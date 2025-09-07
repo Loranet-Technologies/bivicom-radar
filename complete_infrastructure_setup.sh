@@ -90,14 +90,25 @@ check_sudo() {
 
 # Function to check if running on OpenWrt
 check_openwrt() {
-    if [ ! -f "/etc/openwrt_release" ] && [ ! -f "/etc/openwrt_version" ]; then
-        print_warning "This system is not OpenWrt. UCI configuration will be skipped."
-        return 1
-    fi
-    
+    # Check for UCI command first (most reliable indicator)
     if ! command -v uci >/dev/null 2>&1; then
         print_warning "UCI command not found. UCI configuration will be skipped."
         return 1
+    fi
+    
+    # Check for UCI config directory
+    if [ ! -d "/etc/config" ]; then
+        print_warning "UCI config directory not found. UCI configuration will be skipped."
+        return 1
+    fi
+    
+    # Check for OpenWrt-specific files (multiple possible locations)
+    if [ ! -f "/etc/openwrt_release" ] && [ ! -f "/etc/openwrt_version" ] && [ ! -f "/etc/fw_version" ]; then
+        # Additional check: look for OpenWrt in kernel version
+        if ! uname -r | grep -q "openwrt"; then
+            print_warning "This system is not OpenWrt. UCI configuration will be skipped."
+            return 1
+        fi
     fi
     
     print_success "OpenWrt system detected with UCI support"
