@@ -1368,6 +1368,9 @@ show_version() {
     echo "Repository: https://github.com/Loranet-Technologies/bivicom-radar"
 }
 
+# Global variable to track auto-run mode
+AUTO_RUN_MODE=false
+
 # Function to handle command line arguments
 handle_arguments() {
     while [[ $# -gt 0 ]]; do
@@ -1397,6 +1400,7 @@ handle_arguments() {
                 ;;
             --auto|-y|--yes)
                 print_status "Auto-run mode enabled. Proceeding with installation..."
+                AUTO_RUN_MODE=true
                 shift
                 ;;
             --skip-uci)
@@ -1452,7 +1456,7 @@ main() {
     if check_openwrt; then
         IS_OPENWRT=true
         # Check if we're in auto-run mode
-        if [[ "$1" == "--auto" || "$1" == "-y" || "$1" == "--yes" ]]; then
+        if [[ "$AUTO_RUN_MODE" == "true" ]]; then
             print_status "Auto-run mode: Using default UCI configuration"
             TARGET_HOSTNAME="router"
             TARGET_LAN_IP="192.168.14.1"
