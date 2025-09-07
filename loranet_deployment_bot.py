@@ -149,16 +149,73 @@ class LoranetDeploymentBot:
         
         return None
 
-    def is_target_device(self, mac: str) -> bool:
-        """Check if MAC address matches target device prefixes"""
+    def validate_mac_address(self, mac: str) -> Dict:
+        """Validate MAC address and check against authorized manufacturers"""
         if not mac:
-            return False
-            
+            return {'valid': False, 'reason': 'Empty MAC address'}
+        
         mac_lower = mac.lower()
+        
+        # Validate MAC format
+        import re
+        if not re.match(r'^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$', mac_lower):
+            return {'valid': False, 'reason': 'Invalid MAC address format'}
+        
+        # Extract OUI (first 3 octets)
+        oui = mac_lower[:8]  # XX:XX:XX format
+        
+        # Known Bivicom manufacturer prefixes
+        authorized_ouis = {
+            "a4:7a:cf": "VIBICOM COMMUNICATIONS INC.",
+            "00:06:2c": "Bivio Networks", 
+            "00:24:d9": "BICOM, Inc.",
+            "00:52:24": "Bivicom (custom/private)",
+            "02:52:24": "Bivicom (alternative)"
+        }
+        
+        # Check against configured target prefixes
         for prefix in self.config['target_mac_prefixes']:
             if mac_lower.startswith(prefix.lower()):
-                return True
-        return False
+                return {
+                    'valid': True, 
+                    'authorized': True,
+                    'oui': oui,
+                    'manufacturer': f"Configured prefix: {prefix}",
+                    'reason': 'Matches configured target prefix'
+                }
+        
+        # Check against known Bivicom OUIs
+        if oui in authorized_ouis:
+            return {
+                'valid': True,
+                'authorized': True, 
+                'oui': oui,
+                'manufacturer': authorized_ouis[oui],
+                'reason': 'Matches authorized Bivicom OUI'
+            }
+        
+        return {
+            'valid': True,
+            'authorized': False,
+            'oui': oui,
+            'manufacturer': 'Unknown',
+            'reason': 'Not in authorized Bivicom OUI list'
+        }
+
+    def is_target_device(self, mac: str) -> bool:
+        """Check if MAC address matches target device prefixes"""
+        validation = self.validate_mac_address(mac)
+        
+        if not validation['valid']:
+            self.log(f"Invalid MAC address {mac}: {validation['reason']}", "ERROR")
+            return False
+        
+        if validation['authorized']:
+            self.log(f"Device {mac} ({validation['oui']}) authorized: {validation['manufacturer']}", "SUCCESS")
+            return True
+        else:
+            self.log(f"Device {mac} ({validation['oui']}) not authorized: {validation['reason']}", "WARNING")
+            return False
 
     def test_ssh_connection(self, ip: str, username: str, password: str) -> bool:
         """Test SSH connection to a host"""
@@ -182,6 +239,21 @@ class LoranetDeploymentBot:
             self.log(f"SSH connection failed to {ip}: {e}", "DEBUG")
             return False
 
+    def log_security_event(self, event_type: str, ip: str, mac: str, details: str):
+        """Log security events for auditing"""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] SECURITY [{event_type}] IP: {ip} MAC: {mac} Details: {details}"
+        
+        # Log to console
+        self.log(f"SECURITY [{event_type}] {ip} ({mac}): {details}", "WARNING")
+        
+        # Log to file
+        try:
+            with open("security_audit.log", "a") as f:
+                f.write(log_entry + "\n")
+        except Exception as e:
+            self.log(f"Failed to write security log: {e}", "ERROR")
+
     def discover_devices(self) -> List[Dict]:
         """Discover and identify target devices on the network"""
         self.log("Starting device discovery...")
@@ -190,6 +262,7 @@ class LoranetDeploymentBot:
         active_hosts = self.scan_network(self.config['network_range'])
         
         discovered_devices = []
+        unauthorized_devices = []
         
         for ip in active_hosts:
             self.log(f"Analyzing host: {ip}")
@@ -200,9 +273,15 @@ class LoranetDeploymentBot:
                 self.log(f"Could not determine MAC for {ip}", "WARNING")
                 continue
             
-            # Check if it's a target device
-            if self.is_target_device(mac):
-                self.log(f"Found target device: {ip} (MAC: {mac})")
+            # Validate MAC address and check authorization
+            validation = self.validate_mac_address(mac)
+            
+            if not validation['valid']:
+                self.log_security_event("INVALID_MAC", ip, mac, validation['reason'])
+                continue
+            
+            if validation['authorized']:
+                self.log(f"Found authorized device: {ip} (MAC: {mac}) - {validation['manufacturer']}")
                 
                 # Test SSH connection
                 if self.test_ssh_connection(ip, self.config['default_credentials']['username'], 
@@ -210,19 +289,42 @@ class LoranetDeploymentBot:
                     device_info = {
                         'ip': ip,
                         'mac': mac,
+                        'oui': validation['oui'],
+                        'manufacturer': validation['manufacturer'],
                         'username': self.config['default_credentials']['username'],
                         'password': self.config['default_credentials']['password'],
-                        'status': 'ready'
+                        'status': 'ready',
+                        'authorized': True
                     }
                     discovered_devices.append(device_info)
                     self.log(f"Device {ip} is ready for deployment", "SUCCESS")
                 else:
                     self.log(f"Device {ip} found but SSH connection failed", "WARNING")
             else:
-                self.log(f"Host {ip} (MAC: {mac}) is not a target device", "DEBUG")
+                # Log unauthorized device attempt
+                self.log_security_event("UNAUTHORIZED_DEVICE", ip, mac, 
+                                      f"OUI: {validation['oui']} - {validation['reason']}")
+                unauthorized_devices.append({
+                    'ip': ip,
+                    'mac': mac,
+                    'oui': validation['oui'],
+                    'manufacturer': validation['manufacturer'],
+                    'reason': validation['reason']
+                })
+                self.log(f"Host {ip} (MAC: {mac}) is not authorized for deployment", "WARNING")
         
         self.discovered_devices = discovered_devices
-        self.log(f"Discovery completed. Found {len(discovered_devices)} target devices")
+        
+        # Summary
+        self.log(f"Discovery completed:")
+        self.log(f"  - Authorized devices found: {len(discovered_devices)}")
+        self.log(f"  - Unauthorized devices detected: {len(unauthorized_devices)}")
+        
+        if unauthorized_devices:
+            self.log("Unauthorized devices detected:", "WARNING")
+            for device in unauthorized_devices:
+                self.log(f"  - {device['ip']} ({device['mac']}) - {device['manufacturer']}", "WARNING")
+        
         return discovered_devices
 
     def deploy_to_device(self, device: Dict) -> bool:
@@ -460,6 +562,8 @@ def main():
     parser.add_argument('--password', '-p', help='SSH password')
     parser.add_argument('--mac-prefix', action='append', help='MAC address prefix to target')
     parser.add_argument('--discover-only', action='store_true', help='Only discover devices, do not deploy')
+    parser.add_argument('--validate-mac', help='Validate a specific MAC address')
+    parser.add_argument('--list-authorized', action='store_true', help='List all authorized MAC address prefixes')
     
     args = parser.parse_args()
     
@@ -478,12 +582,42 @@ def main():
     if args.mac_prefix:
         bot.config['target_mac_prefixes'] = args.mac_prefix
     
+    # Handle special commands
+    if args.validate_mac:
+        validation = bot.validate_mac_address(args.validate_mac)
+        print(f"\nMAC Address Validation Results:")
+        print(f"MAC Address: {args.validate_mac}")
+        print(f"Valid: {validation['valid']}")
+        if validation['valid']:
+            print(f"Authorized: {validation['authorized']}")
+            print(f"OUI: {validation['oui']}")
+            print(f"Manufacturer: {validation['manufacturer']}")
+            print(f"Reason: {validation['reason']}")
+        else:
+            print(f"Error: {validation['reason']}")
+        return
+    
+    if args.list_authorized:
+        print(f"\nAuthorized MAC Address Prefixes:")
+        print("=" * 50)
+        authorized_ouis = {
+            "a4:7a:cf": "VIBICOM COMMUNICATIONS INC.",
+            "00:06:2c": "Bivio Networks", 
+            "00:24:d9": "BICOM, Inc.",
+            "00:52:24": "Bivicom (custom/private)",
+            "02:52:24": "Bivicom (alternative)"
+        }
+        for oui, manufacturer in authorized_ouis.items():
+            print(f"  {oui} - {manufacturer}")
+        print(f"\nConfigured target prefixes: {bot.config['target_mac_prefixes']}")
+        return
+    
     # Run bot
     if args.discover_only:
         devices = bot.discover_devices()
         print(f"\nDiscovered {len(devices)} target devices:")
         for device in devices:
-            print(f"  - {device['ip']} (MAC: {device['mac']})")
+            print(f"  - {device['ip']} (MAC: {device['mac']}) - {device.get('manufacturer', 'Unknown')}")
     else:
         bot.run()
 

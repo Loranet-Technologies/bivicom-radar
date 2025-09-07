@@ -6,14 +6,22 @@
   },
   "target_mac_prefixes": [
     "00:52:24",
-    "02:52:24",
-    "aa:bb:cc"
+    "02:52:24"
   ],
+  "authorized_ouis": {
+    "a4:7a:cf": "VIBICOM COMMUNICATIONS INC.",
+    "00:06:2c": "Bivio Networks",
+    "00:24:d9": "BICOM, Inc.",
+    "00:52:24": "Bivicom (custom/private)",
+    "02:52:24": "Bivicom (alternative)"
+  },
   "deployment_mode": "auto",
   "ssh_timeout": 10,
   "scan_timeout": 5,
   "max_threads": 50,
   "log_level": "INFO",
   "backup_before_deploy": true,
-  "verify_deployment": true
+  "verify_deployment": true,
+  "security_logging": true,
+  "strict_mac_validation": true
 }
