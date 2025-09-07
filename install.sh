@@ -6,7 +6,7 @@
 # This script downloads and runs the complete infrastructure setup
 # 
 # Author: Aqmar
-# Repository: https://github.com/loranet/complete-infrastructure-setup
+# Repository: https://github.com/Loranet-Technologies/bivicom-radar
 # =============================================================================
 
 set -e  # Exit on any error
