@@ -181,6 +181,18 @@ main() {
             print_status "Run it with: cd $INSTALL_DIR && ./complete_infrastructure_setup.sh"
             exit 0
             ;;
+        -y|--yes|--auto)
+            print_section "DOWNLOADING LORANET INFRASTRUCTURE SETUP (AUTO-RUN)"
+            check_curl
+            mkdir -p "$INSTALL_DIR"
+            cd "$INSTALL_DIR"
+            curl -sSL "$SCRIPT_URL" -o complete_infrastructure_setup.sh
+            chmod +x complete_infrastructure_setup.sh
+            print_success "Setup script downloaded successfully"
+            print_status "Starting auto-run installation..."
+            ./complete_infrastructure_setup.sh --auto
+            exit 0
+            ;;
         "")
             # No arguments, proceed with full installation
             ;;
