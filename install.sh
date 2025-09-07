@@ -176,7 +176,7 @@ main() {
             mkdir -p "$INSTALL_DIR"
             cd "$INSTALL_DIR"
             curl -sSL "$SCRIPT_URL" -o complete_infrastructure_setup.sh
-            chmod +x complete_infrastructure_setup.sh
+            sudo chmod +x complete_infrastructure_setup.sh
             print_success "Setup script downloaded to: $INSTALL_DIR/complete_infrastructure_setup.sh"
             print_status "Run it with: cd $INSTALL_DIR && ./complete_infrastructure_setup.sh"
             exit 0
@@ -187,7 +187,7 @@ main() {
             mkdir -p "$INSTALL_DIR"
             cd "$INSTALL_DIR"
             curl -sSL "$SCRIPT_URL" -o complete_infrastructure_setup.sh
-            chmod +x complete_infrastructure_setup.sh
+            sudo chmod +x complete_infrastructure_setup.sh
             print_success "Setup script downloaded successfully"
             print_status "Starting auto-run installation..."
             ./complete_infrastructure_setup.sh --auto
@@ -213,4 +213,3 @@ main() {
 
 # Run main function
 main "$@"
-# Cache refresh Mon Sep  8 01:07:00 CST 2025

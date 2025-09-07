@@ -21,7 +21,7 @@ curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/m
 curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/complete_infrastructure_setup.sh -o setup.sh
 
 # Make executable and run
-chmod +x setup.sh
+sudo chmod +x setup.sh
 ./setup.sh
 ```
 
