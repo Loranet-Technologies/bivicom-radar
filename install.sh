@@ -19,8 +19,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Repository information
-REPO_URL="https://github.com/loranet/complete-infrastructure-setup"
-SCRIPT_URL="https://raw.githubusercontent.com/loranet/complete-infrastructure-setup/main/complete_infrastructure_setup.sh"
+REPO_URL="https://github.com/Loranet-Technologies/bivicom-radar"
+SCRIPT_URL="https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/complete_infrastructure_setup.sh"
 INSTALL_DIR="/tmp/loranet-setup"
 
 # Function to print colored output
@@ -134,7 +134,7 @@ show_help() {
     echo "Examples:"
     echo "  $0                    # Download and run installation"
     echo "  $0 --download         # Download only"
-    echo "  curl -sSL https://raw.githubusercontent.com/loranet/complete-infrastructure-setup/main/install.sh | bash"
+    echo "  curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash"
     echo
     echo "Repository: $REPO_URL"
     echo "Author: Aqmar"

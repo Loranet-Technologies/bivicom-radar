@@ -11,14 +11,14 @@ A comprehensive infrastructure setup script that combines Node-RED, Tailscale, D
 ### One-Line Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/loranet/complete-infrastructure-setup/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash
 ```
 
 ### Manual Installation
 
 ```bash
 # Download the setup script
-curl -sSL https://raw.githubusercontent.com/loranet/complete-infrastructure-setup/main/complete_infrastructure_setup.sh -o setup.sh
+curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/complete_infrastructure_setup.sh -o setup.sh
 
 # Make executable and run
 chmod +x setup.sh
@@ -268,7 +268,7 @@ For support and questions:
 
 ---
 
-**Repository**: https://github.com/loranet/complete-infrastructure-setup  
+**Repository**: https://github.com/Loranet-Technologies/bivicom-radar  
 **Author**: Aqmar  
 **Version**: 1.0.0  
 **Last Updated**: September 8, 2025  
