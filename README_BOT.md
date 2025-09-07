@@ -5,12 +5,14 @@ An automated bot that discovers devices on your network, identifies them by MAC 
 ## 🚀 Features
 
 - **Network Discovery**: Automatically scans network ranges for active devices
-- **MAC Address Identification**: Identifies target devices by MAC address prefixes
+- **MAC Address Validation**: Validates devices against authorized Bivicom manufacturer prefixes
+- **Security Logging**: Comprehensive security audit logging for unauthorized access attempts
 - **SSH Automation**: Connects to devices using default credentials (admin/admin)
 - **Automated Deployment**: Runs the Loranet infrastructure setup script remotely
 - **Progress Monitoring**: Real-time monitoring of deployment progress
 - **Verification**: Verifies successful deployment of services
 - **Reporting**: Generates detailed deployment reports
+- **OUI Validation**: Checks against IEEE OUI database for manufacturer verification
 
 ## 📋 Prerequisites
 
@@ -51,6 +53,13 @@ Edit `bot_config.json` to customize the bot behavior:
     "00:52:24",
     "02:52:24"
   ],
+  "authorized_ouis": {
+    "a4:7a:cf": "VIBICOM COMMUNICATIONS INC.",
+    "00:06:2c": "Bivio Networks",
+    "00:24:d9": "BICOM, Inc.",
+    "00:52:24": "Bivicom (custom/private)",
+    "02:52:24": "Bivicom (alternative)"
+  },
   "deployment_mode": "auto",
   "ssh_timeout": 10,
   "scan_timeout": 5,
@@ -98,7 +107,32 @@ python3 loranet_deployment_bot.py --mac-prefix 00:52:24 --mac-prefix 02:52:24 --
 
 # Use custom configuration file
 python3 loranet_deployment_bot.py --config my_config.json --mode auto
+
+# Validate a specific MAC address
+python3 loranet_deployment_bot.py --validate-mac 00:52:24:4d:d8:cc
+
+# List all authorized MAC prefixes
+python3 loranet_deployment_bot.py --list-authorized
 ```
+
+### MAC Address Validation
+
+The bot includes comprehensive MAC address validation to ensure only authorized Bivicom devices are targeted:
+
+```bash
+# Test MAC validation
+python3 test_mac_simple.py
+
+# Validate specific MAC
+python3 loranet_deployment_bot.py --validate-mac 00:52:24:4d:d8:cc
+```
+
+**Authorized Bivicom MAC Prefixes:**
+- `a4:7a:cf` - VIBICOM COMMUNICATIONS INC.
+- `00:06:2c` - Bivio Networks
+- `00:24:d9` - BICOM, Inc.
+- `00:52:24` - Bivicom (custom/private)
+- `02:52:24` - Bivicom (alternative)
 
 ### Command Line Options
 
@@ -109,17 +143,21 @@ python3 loranet_deployment_bot.py --config my_config.json --mode auto
 - `--password, -p`: SSH password
 - `--mac-prefix`: MAC address prefix to target (can be used multiple times)
 - `--discover-only`: Only discover devices, do not deploy
+- `--validate-mac`: Validate a specific MAC address
+- `--list-authorized`: List all authorized MAC address prefixes
 
 ## 🔍 How It Works
 
 1. **Network Scanning**: Scans the specified network range for active hosts
 2. **MAC Address Detection**: Uses ARP table to get MAC addresses of active hosts
-3. **Device Identification**: Matches MAC addresses against target prefixes
-4. **SSH Connection**: Tests SSH connectivity with default credentials
-5. **Deployment**: Executes the Loranet infrastructure setup script
-6. **Monitoring**: Monitors deployment progress in real-time
-7. **Verification**: Verifies that services are running after deployment
-8. **Reporting**: Generates detailed deployment report
+3. **MAC Validation**: Validates MAC addresses against authorized Bivicom manufacturer prefixes
+4. **Security Logging**: Logs unauthorized device attempts for security auditing
+5. **Device Identification**: Matches MAC addresses against target prefixes
+6. **SSH Connection**: Tests SSH connectivity with default credentials
+7. **Deployment**: Executes the Loranet infrastructure setup script
+8. **Monitoring**: Monitors deployment progress in real-time
+9. **Verification**: Verifies that services are running after deployment
+10. **Reporting**: Generates detailed deployment report
 
 ## 📊 Example Output
 
@@ -127,19 +165,25 @@ python3 loranet_deployment_bot.py --config my_config.json --mode auto
 [2025-01-08 10:30:15] [INFO] Starting device discovery...
 [2025-01-08 10:30:16] [INFO] Scanning network range: 192.168.1.0/24
 [2025-01-08 10:30:18] [INFO] Found active host: 192.168.1.1
-[2025-01-08 10:30:19] [INFO] Found target device: 192.168.1.1 (MAC: 00:52:24:4d:d8:cc)
+[2025-01-08 10:30:19] [SUCCESS] Device 192.168.1.1 (00:52:24) authorized: Bivicom (custom/private)
 [2025-01-08 10:30:20] [SUCCESS] Device 192.168.1.1 is ready for deployment
 [2025-01-08 10:30:21] [INFO] Starting deployment to 192.168.1.1
 [2025-01-08 10:30:22] [INFO] Executing deployment command on 192.168.1.1
 [2025-01-08 10:35:45] [SUCCESS] Deployment to 192.168.1.1 completed successfully
+
+# Security logging example
+[2025-01-08 10:30:25] [WARNING] SECURITY [UNAUTHORIZED_DEVICE] 192.168.1.100 (00:50:56:12:34:56): OUI: 00:50:56 - Not in authorized Bivicom OUI list
 ```
 
 ## 🛡️ Security Considerations
 
-- The bot uses default credentials (admin/admin) - change these in production
-- SSH connections are made with auto-accept host keys
-- Consider using SSH keys instead of passwords for better security
-- Ensure the bot runs on a trusted network
+- **MAC Address Validation**: Only deploys to authorized Bivicom devices
+- **Security Logging**: All unauthorized access attempts are logged to `security_audit.log`
+- **OUI Verification**: Validates against known Bivicom manufacturer prefixes
+- **Default Credentials**: Uses admin/admin - change these in production
+- **SSH Security**: Connections made with auto-accept host keys
+- **Network Trust**: Ensure the bot runs on a trusted network
+- **Audit Trail**: Complete logging of all security events for compliance
 
 ## 🐛 Troubleshooting
 
