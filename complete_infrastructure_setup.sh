@@ -1,0 +1,1094 @@
+#!/bin/bash
+
+# =============================================================================
+# Complete Infrastructure Setup Script with UCI Configuration
+# =============================================================================
+# This script combines Node-RED, Tailscale, Docker, Portainer, Restreamer,
+# and UCI configuration setup for OpenWrt systems
+# 
+# Author: Aqmar
+# Date: $(date +%Y-%m-%d)
+# =============================================================================
+
+set -e  # Exit on any error
+
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration variables
+NODE_VERSION="18"
+NVM_VERSION="v0.39.1"
+NODERED_USER="$USER"
+NODERED_HOME="/home/$USER"
+TIMEZONE="Asia/Kuala_Lumpur"
+RESTREAMER_USERNAME="admin"
+RESTREAMER_PASSWORD="L@ranet2025"
+RESTREAMER_DATA_DIR="/mnt/restreamer/db"
+PORTAINER_DATA_DIR="/opt/portainer"
+RESTREAMER_CONFIG_DIR="/opt/restreamer"
+
+# UCI Configuration variables (will be set interactively)
+TARGET_HOSTNAME=""
+TARGET_LAN_IP=""
+TARGET_LAN_NETMASK="255.255.255.0"
+TARGET_LAN_MAC="00:52:24:4d:d8:cc"
+TARGET_WIFI_SSID=""
+TARGET_WIFI_PASSWORD="1qaz2wsx"
+TARGET_WIFI_CHANNEL="10"
+TARGET_APN="Max4g"
+
+echo "************************************************"
+echo "           Script created by: Aqmar"   
+echo "************************************************"
+
+# Function to print colored output
+print_status() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_section() {
+    echo
+    echo "=========================================="
+    echo -e "${YELLOW}$1${NC}"
+    echo "=========================================="
+}
+
+# Function to check if running as root
+check_root() {
+    if [[ $EUID -eq 0 ]]; then
+        print_error "This script should not be run as root. Please run as a regular user with sudo privileges."
+        exit 1
+    fi
+}
+
+# Function to check if sudo is available
+check_sudo() {
+    if ! sudo -n true 2>/dev/null; then
+        print_error "This script requires sudo privileges. Please ensure your user has sudo access."
+        exit 1
+    fi
+}
+
+# Function to check if running on OpenWrt
+check_openwrt() {
+    if [ ! -f "/etc/openwrt_release" ] && [ ! -f "/etc/openwrt_version" ]; then
+        print_warning "This system is not OpenWrt. UCI configuration will be skipped."
+        return 1
+    fi
+    
+    if ! command -v uci >/dev/null 2>&1; then
+        print_warning "UCI command not found. UCI configuration will be skipped."
+        return 1
+    fi
+    
+    print_success "OpenWrt system detected with UCI support"
+    return 0
+}
+
+# Function to get user input with default value
+get_user_input() {
+    local prompt="$1"
+    local default="$2"
+    local var_name="$3"
+    
+    if [ -n "$default" ]; then
+        echo -e "${BLUE}[INPUT]${NC} $prompt (default: $default): "
+        read -r input
+        if [ -z "$input" ]; then
+            input="$default"
+        fi
+    else
+        echo -e "${BLUE}[INPUT]${NC} $prompt: "
+        read -r input
+        while [ -z "$input" ]; do
+            print_error "This field is required. Please enter a value."
+            echo -e "${BLUE}[INPUT]${NC} $prompt: "
+            read -r input
+        done
+    fi
+    
+    eval "$var_name='$input'"
+}
+
+# Function to validate IP address
+validate_ip() {
+    local ip="$1"
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        IFS='.' read -ra ADDR <<< "$ip"
+        for i in "${ADDR[@]}"; do
+            if [ "$i" -gt 255 ] || [ "$i" -lt 0 ]; then
+                return 1
+            fi
+        done
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to get UCI configuration from user
+get_uci_configuration() {
+    echo
+    echo "=========================================="
+    echo "  UCI Configuration Input"
+    echo "=========================================="
+    echo
+    
+    # Get hostname
+    get_user_input "Enter hostname for the device" "router" "TARGET_HOSTNAME"
+    
+    # Get local IP address
+    while true; do
+        get_user_input "Enter local IP address (e.g., 192.168.1.1)" "192.168.14.1" "TARGET_LAN_IP"
+        if validate_ip "$TARGET_LAN_IP"; then
+            break
+        else
+            print_error "Invalid IP address format. Please enter a valid IP address."
+        fi
+    done
+    
+    # Set WiFi SSID to hostname
+    TARGET_WIFI_SSID="$TARGET_HOSTNAME"
+    print_status "WiFi SSID will be set to: $TARGET_WIFI_SSID"
+    
+    # Get WiFi password
+    get_user_input "Enter WiFi password" "1qaz2wsx" "TARGET_WIFI_PASSWORD"
+    
+    # Get WiFi channel
+    get_user_input "Enter WiFi channel (1-11 for 2.4GHz)" "10" "TARGET_WIFI_CHANNEL"
+    
+    # Get APN (for LTE)
+    get_user_input "Enter LTE APN" "Max4g" "TARGET_APN"
+    
+    echo
+    print_status "=== UCI Configuration Summary ==="
+    echo "Hostname: $TARGET_HOSTNAME"
+    echo "Local IP: $TARGET_LAN_IP"
+    echo "WiFi SSID: $TARGET_WIFI_SSID"
+    echo "WiFi Password: $TARGET_WIFI_PASSWORD"
+    echo "WiFi Channel: $TARGET_WIFI_CHANNEL"
+    echo "LTE APN: $TARGET_APN"
+    echo
+    
+    # Confirm configuration
+    echo -e "${YELLOW}[CONFIRM]${NC} Do you want to proceed with this UCI configuration? (y/N): "
+    read -r confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_warning "UCI configuration cancelled by user."
+        return 1
+    fi
+    
+    print_success "UCI configuration confirmed. Proceeding with setup..."
+    return 0
+}
+
+# Function to detect system architecture
+detect_architecture() {
+    ARCH=$(uname -m)
+    case $ARCH in
+        x86_64)
+            RESTREAMER_IMAGE="datarhei/restreamer:latest"
+            ;;
+        aarch64|arm64)
+            RESTREAMER_IMAGE="datarhei/restreamer-aarch64:latest"
+            ;;
+        armv7l)
+            RESTREAMER_IMAGE="datarhei/restreamer:latest"
+            ;;
+        *)
+            print_warning "Unknown architecture: $ARCH. Using default restreamer image."
+            RESTREAMER_IMAGE="datarhei/restreamer:latest"
+            ;;
+    esac
+    print_status "Detected architecture: $ARCH"
+    print_status "Using Restreamer image: $RESTREAMER_IMAGE"
+}
+
+# Function to update system
+update_system() {
+    print_status "Updating system packages..."
+    sudo apt update -y
+    sudo apt upgrade -y
+    print_success "System packages updated"
+}
+
+# Function to install dependencies
+install_dependencies() {
+    print_status "Installing required dependencies..."
+    sudo apt install -y \
+        apt-transport-https \
+        ca-certificates \
+        curl \
+        gnupg \
+        lsb-release \
+        software-properties-common \
+        wget \
+        nano \
+        htop \
+        build-essential \
+        python3
+    print_success "Dependencies installed"
+}
+
+# =============================================================================
+# NODE-RED INSTALLATION FUNCTIONS
+# =============================================================================
+
+# Function to install NVM
+install_nvm() {
+    print_status "Installing NVM (Node Version Manager)..."
+    
+    # Check if NVM is already installed
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        print_warning "NVM is already installed"
+        return 0
+    fi
+    
+    # Download and install NVM
+    curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_VERSION/install.sh" | bash
+    
+    # Source NVM for the current shell session
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+    
+    # Verify NVM installation
+    if command -v nvm >/dev/null 2>&1; then
+        print_success "NVM installed successfully"
+    else
+        print_error "NVM installation failed"
+        exit 1
+    fi
+}
+
+# Function to install Node.js
+install_nodejs() {
+    print_status "Installing Node.js version $NODE_VERSION..."
+    
+    # Ensure NVM is loaded
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    
+    # Install and use Node.js
+    nvm install $NODE_VERSION
+    nvm use $NODE_VERSION
+    nvm alias default $NODE_VERSION
+    
+    # Verify installation
+    NODE_PATH=$(nvm which $NODE_VERSION)
+    if [ -n "$NODE_PATH" ]; then
+        print_success "Node.js $NODE_VERSION installed at: $NODE_PATH"
+        NODE_DIR=$(dirname "$NODE_PATH")
+        print_status "Node.js directory: $NODE_DIR"
+    else
+        print_error "Failed to get Node.js path"
+        exit 1
+    fi
+}
+
+# Function to install Node-RED
+install_nodered() {
+    print_status "Installing Node-RED..."
+    
+    # Ensure NVM is loaded
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm use $NODE_VERSION
+    
+    # Install Node-RED globally
+    npm install -g --unsafe-perm node-red
+    
+    # Verify installation
+    if command -v node-red >/dev/null 2>&1; then
+        print_success "Node-RED installed successfully"
+    else
+        print_error "Node-RED installation failed"
+        exit 1
+    fi
+}
+
+# Function to install Node-RED nodes
+install_nodered_nodes() {
+    print_status "Installing Node-RED nodes..."
+    
+    # Create .node-red directory if it doesn't exist
+    mkdir -p "$NODERED_HOME/.node-red"
+    cd "$NODERED_HOME/.node-red"
+    
+    # Install required nodes from package.json
+    npm install node-red-contrib-ffmpeg@~0.1.1
+    npm install node-red-contrib-queue-gate@~1.5.5
+    npm install node-red-node-sqlite@~1.1.0
+    npm install node-red-node-serialport@2.0.3
+    
+    print_success "Node-RED nodes installed"
+}
+
+# Function to create Node-RED systemd service
+create_nodered_systemd_service() {
+    print_status "Setting up Node-RED systemd service..."
+    
+    # Get the actual Node.js path
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm use $NODE_VERSION
+    NODE_PATH=$(nvm which $NODE_VERSION)
+    NODE_DIR=$(dirname "$NODE_PATH")
+    
+    # Create systemd service file
+    cat <<EOL | sudo tee /etc/systemd/system/nodered.service
+[Unit]
+Description=Node-RED
+Documentation=http://nodered.org
+After=network.target
+
+[Service]
+ExecStart=/bin/bash -c 'source $NODERED_HOME/.nvm/nvm.sh && nvm use $NODE_VERSION && node-red'
+User=$NODERED_USER
+Group=$NODERED_USER
+WorkingDirectory=$NODERED_HOME
+Restart=on-failure
+Environment=NODE_RED_OPTIONS=-v
+Environment=PATH=$NODE_DIR:$PATH
+Environment=HOME=$NODERED_HOME
+Environment=USER=$NODERED_USER
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=node-red
+
+[Install]
+WantedBy=multi-user.target
+EOL
+    
+    # Set proper permissions
+    sudo chown -R $NODERED_USER:$NODERED_USER "$NODERED_HOME/.nvm"
+    sudo chown -R $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red"
+    
+    # Reload systemd
+    sudo systemctl daemon-reload
+    
+    print_success "Node-RED systemd service created"
+}
+
+# Function to start and enable Node-RED
+start_nodered() {
+    print_status "Enabling and starting Node-RED service..."
+    
+    # Enable Node-RED to start on boot
+    sudo systemctl enable nodered
+    
+    # Start Node-RED service
+    sudo systemctl start nodered
+    
+    # Wait a moment for service to start
+    sleep 5
+    
+    # Check status
+    if sudo systemctl is-active --quiet nodered; then
+        print_success "Node-RED service is running"
+    else
+        print_error "Node-RED service failed to start"
+        print_status "Checking service status..."
+        sudo systemctl status nodered --no-pager
+        exit 1
+    fi
+}
+
+# Function to copy flows to script directory
+copy_flows_to_script() {
+    print_status "Copying Node-RED flows to script directory..."
+    
+    # Get the script directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Create nodered_flows directory in script location
+    mkdir -p "$SCRIPT_DIR/nodered_flows"
+    
+    # Copy flows from current server if they exist
+    if [ -f "/home/admin/.node-red/flows.json" ]; then
+        cp "/home/admin/.node-red/flows.json" "$SCRIPT_DIR/nodered_flows/flows.json"
+        print_success "Flows copied to script directory"
+    else
+        print_warning "No existing flows found on this server"
+    fi
+    
+    # Copy package.json if it exists
+    if [ -f "/home/admin/.node-red/package.json" ]; then
+        cp "/home/admin/.node-red/package.json" "$SCRIPT_DIR/nodered_flows/package.json"
+        print_success "Package.json copied to script directory"
+    fi
+}
+
+# Function to import flows
+import_flows() {
+    print_status "Importing Node-RED flows from local backup..."
+    
+    # Stop Node-RED temporarily
+    sudo systemctl stop nodered
+    
+    # Get the script directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Copy flows from script directory
+    if [ -f "$SCRIPT_DIR/nodered_flows/flows.json" ]; then
+        cp "$SCRIPT_DIR/nodered_flows/flows.json" "$NODERED_HOME/.node-red/flows.json"
+        print_success "Flows copied from local backup"
+    else
+        print_warning "Local flows not found, creating default flows"
+        # Create a basic flows.json if local backup doesn't exist
+        cat > "$NODERED_HOME/.node-red/flows.json" << 'EOF'
+[
+    {
+        "id": "tab1",
+        "type": "tab",
+        "label": "Default Flow",
+        "disabled": false,
+        "info": "Default Node-RED flow"
+    }
+]
+EOF
+    fi
+    
+    # Copy package.json if available
+    if [ -f "$SCRIPT_DIR/nodered_flows/package.json" ]; then
+        cp "$SCRIPT_DIR/nodered_flows/package.json" "$NODERED_HOME/.node-red/package.json"
+        print_success "Package.json copied from local backup"
+    fi
+    
+    # Set proper ownership
+    sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
+    sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/package.json" 2>/dev/null || true
+    
+    # Restart Node-RED
+    sudo systemctl start nodered
+    
+    # Wait for restart
+    sleep 5
+    
+    if sudo systemctl is-active --quiet nodered; then
+        print_success "Flows imported and Node-RED restarted successfully"
+    else
+        print_error "Failed to restart Node-RED after importing flows"
+        exit 1
+    fi
+}
+
+# Function to install Tailscale
+install_tailscale() {
+    print_status "Installing Tailscale..."
+    
+    # Download and run Tailscale installation script
+    curl -sSL https://raw.githubusercontent.com/iyon09/Bivocom-Node-RED-Tailscale-/main/DanLab_BV2.sh | bash
+    
+    # Enable and start Tailscale
+    sudo systemctl enable tailscaled
+    sudo systemctl start tailscaled
+    
+    # Verify Tailscale installation
+    if sudo systemctl is-active --quiet tailscaled; then
+        print_success "Tailscale installed and running"
+    else
+        print_error "Tailscale installation or startup failed"
+        exit 1
+    fi
+}
+
+# =============================================================================
+# DOCKER INSTALLATION FUNCTIONS
+# =============================================================================
+
+# Function to install Docker
+install_docker() {
+    print_status "Installing Docker..."
+    
+    # Remove old Docker installations
+    sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    
+    # Add Docker's official GPG key
+    sudo mkdir -p /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    
+    # Add Docker repository
+    echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
+    # Update package index
+    sudo apt update
+    
+    # Install Docker Engine
+    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    
+    # Add current user to docker group
+    sudo usermod -aG docker $USER
+    
+    # Enable and start Docker service
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    
+    print_success "Docker installed successfully"
+}
+
+# Function to create directories
+create_docker_directories() {
+    print_status "Creating required directories..."
+    
+    # Create portainer directory
+    sudo mkdir -p $PORTAINER_DATA_DIR
+    sudo chown $USER:$USER $PORTAINER_DATA_DIR
+    
+    # Create restreamer directory
+    sudo mkdir -p $RESTREAMER_CONFIG_DIR
+    sudo chown $USER:$USER $RESTREAMER_CONFIG_DIR
+    
+    # Create restreamer data directory
+    sudo mkdir -p $RESTREAMER_DATA_DIR
+    sudo chown $USER:$USER $RESTREAMER_DATA_DIR
+    
+    print_success "Directories created"
+}
+
+# Function to create Portainer Docker Compose file
+create_portainer_compose() {
+    print_status "Creating Portainer Docker Compose configuration..."
+    
+    cat > $PORTAINER_DATA_DIR/docker-compose.yml << EOF
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    environment:
+      - TZ=$TIMEZONE
+    ports:
+      - "9000:9000"   # Web UI
+      - "9443:9443"   # HTTPS
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+
+volumes:
+  portainer_data:
+EOF
+    
+    print_success "Portainer Docker Compose file created"
+}
+
+# Function to create Restreamer Docker Compose file
+create_restreamer_compose() {
+    print_status "Creating Restreamer Docker Compose configuration..."
+    
+    cat > $RESTREAMER_CONFIG_DIR/docker-compose.yml << EOF
+services:
+  restreamer:
+    image: $RESTREAMER_IMAGE
+    container_name: restreamer
+    restart: always
+    environment:
+      - RS_USERNAME=$RESTREAMER_USERNAME
+      - RS_PASSWORD=$RESTREAMER_PASSWORD
+      - TZ=$TIMEZONE
+    ports:
+      - "8080:8080"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - $RESTREAMER_DATA_DIR:/restreamer/db
+    tmpfs:
+      - /tmp/hls
+    networks:
+      - restreamer-network
+
+networks:
+  restreamer-network:
+    driver: bridge
+EOF
+    
+    print_success "Restreamer Docker Compose file created"
+}
+
+# Function to start Docker services
+start_docker_services() {
+    print_status "Starting Docker services..."
+    
+    # Apply Docker group membership for current session
+    print_status "Applying Docker group membership..."
+    newgrp docker << EOFNEWGRP
+    # Start Portainer
+    cd $PORTAINER_DATA_DIR
+    docker compose up -d
+    
+    # Start Restreamer
+    cd $RESTREAMER_CONFIG_DIR
+    docker compose up -d
+    
+    print_success "Docker services started"
+EOFNEWGRP
+}
+
+# Function to create management scripts
+create_management_scripts() {
+    print_status "Creating management scripts..."
+    
+    # Create service management script
+    cat > $PORTAINER_DATA_DIR/manage-services.sh << 'EOF'
+#!/bin/bash
+
+# Docker Services Management Script
+
+case "$1" in
+    start)
+        echo "Starting all services..."
+        cd /opt/portainer && docker compose up -d
+        cd /opt/restreamer && docker compose up -d
+        echo "All services started"
+        ;;
+    stop)
+        echo "Stopping all services..."
+        cd /opt/portainer && docker compose down
+        cd /opt/restreamer && docker compose down
+        echo "All services stopped"
+        ;;
+    restart)
+        echo "Restarting all services..."
+        cd /opt/portainer && docker compose restart
+        cd /opt/restreamer && docker compose restart
+        echo "All services restarted"
+        ;;
+    status)
+        echo "Service status:"
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        ;;
+    logs)
+        echo "Portainer logs:"
+        docker logs portainer --tail 20
+        echo
+        echo "Restreamer logs:"
+        docker logs restreamer --tail 20
+        ;;
+    update)
+        echo "Updating all services..."
+        cd /opt/portainer && docker compose pull && docker compose up -d
+        cd /opt/restreamer && docker compose pull && docker compose up -d
+        echo "All services updated"
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status|logs|update}"
+        echo "  start   - Start all services"
+        echo "  stop    - Stop all services"
+        echo "  restart - Restart all services"
+        echo "  status  - Show service status"
+        echo "  logs    - Show service logs"
+        echo "  update  - Update and restart services"
+        exit 1
+        ;;
+esac
+EOF
+    
+    chmod +x $PORTAINER_DATA_DIR/manage-services.sh
+    
+    # Create backup script
+    cat > $PORTAINER_DATA_DIR/backup-services.sh << 'EOF'
+#!/bin/bash
+
+# Docker Services Backup Script
+
+BACKUP_DIR="/opt/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+echo "Creating backup directory..."
+mkdir -p $BACKUP_DIR
+
+echo "Backing up Portainer data..."
+docker run --rm -v portainer_portainer_data:/data -v $BACKUP_DIR:/backup alpine tar czf /backup/portainer-$DATE.tar.gz -C /data .
+
+echo "Backing up Restreamer data..."
+tar czf $BACKUP_DIR/restreamer-$DATE.tar.gz /mnt/restreamer/db
+
+echo "Backup completed: $BACKUP_DIR"
+ls -la $BACKUP_DIR/*$DATE*
+EOF
+    
+    chmod +x $PORTAINER_DATA_DIR/backup-services.sh
+    
+    print_success "Management scripts created"
+}
+
+# =============================================================================
+# UCI CONFIGURATION FUNCTIONS
+# =============================================================================
+
+# Function to backup UCI configuration
+backup_uci_config() {
+    print_status "Creating backup of current UCI configuration..."
+    
+    BACKUP_DIR="/tmp/uci_backup_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+    
+    # Backup all UCI config files
+    cp -r /etc/config/* "$BACKUP_DIR/" 2>/dev/null || true
+    
+    # Backup current UCI state
+    uci show > "$BACKUP_DIR/uci_show_backup.txt" 2>/dev/null || true
+    
+    print_success "UCI configuration backed up to: $BACKUP_DIR"
+    echo "Backup location: $BACKUP_DIR"
+}
+
+# Function to configure UCI system settings
+configure_uci_system() {
+    print_status "Configuring UCI system settings..."
+    
+    # System configuration
+    uci set system.system.hostname="$TARGET_HOSTNAME"
+    uci set system.system.timezone="GMT-8"
+    uci set system.system.zonename="(GMT+08:00) Beijing, Chongqing, Hong Kong, Urumqi"
+    uci set system.system.dual_sim='0'
+    uci set system.system.sms_password='admin'
+    uci set system.system.model='TG451-STD'
+    uci set system.system.enable_212='1'
+    
+    # NTP configuration
+    uci set system.ntp.server='0.openwrt.pool.ntp.org' '1.openwrt.pool.ntp.org' '2.openwrt.pool.ntp.org' '3.openwrt.pool.ntp.org'
+    uci set system.ntp.enabled='1'
+    uci set system.ntp.enable_server='0'
+    
+    # Access configuration
+    uci set system.access.enable_telnet='1'
+    uci set system.access.enable_ssh='0'
+    
+    uci commit system
+    print_success "UCI system configuration completed"
+}
+
+# Function to configure UCI user password
+configure_uci_password() {
+    print_status "Configuring UCI user password..."
+    
+    # Set root password using UCI
+    uci set system.system.password='1qaz2wsx'
+    
+    # Alternative method using passwd command
+    echo "root:1qaz2wsx" | chpasswd 2>/dev/null || {
+        print_warning "Could not set password using chpasswd, trying alternative method..."
+        # Use UCI to set password hash
+        PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
+        if [ -n "$PASSWORD_HASH" ]; then
+            uci set system.system.password="$PASSWORD_HASH"
+            print_success "Password hash set via UCI"
+        else
+            print_warning "Could not generate password hash, password may need to be set manually"
+        fi
+    }
+    
+    # Commit UCI changes
+    uci commit system
+    
+    # Also set password in /etc/shadow if possible
+    if [ -w "/etc/shadow" ]; then
+        PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
+        if [ -n "$PASSWORD_HASH" ]; then
+            sed -i "s|^root:.*|root:$PASSWORD_HASH:0:0:99999:7:::|" /etc/shadow 2>/dev/null || true
+            print_success "Password set in /etc/shadow"
+        fi
+    fi
+    
+    print_success "UCI user password configuration completed"
+    print_status "Username: admin/root"
+    print_status "Password: 1qaz2wsx"
+}
+
+# Function to configure UCI network interfaces
+configure_uci_network() {
+    print_status "Configuring UCI network interfaces..."
+    
+    # Loopback interface
+    uci set network.loopback=interface
+    uci set network.loopback.ifname='lo'
+    uci set network.loopback.proto='static'
+    uci set network.loopback.ipaddr='127.0.0.1'
+    uci set network.loopback.netmask='255.0.0.0'
+    
+    # LAN interface (bridge)
+    uci set network.lan=interface
+    uci set network.lan.type='bridge'
+    uci set network.lan.proto='static'
+    uci set network.lan.netmask="$TARGET_LAN_NETMASK"
+    uci set network.lan.macaddr="$TARGET_LAN_MAC"
+    uci set network.lan.ifname='eth0 eth1'
+    uci set network.lan.ipaddr="$TARGET_LAN_IP"
+    uci set network.lan.dns='8.8.8.8'
+    
+    # WAN interface (LTE)
+    uci set network.wan=interface
+    uci set network.wan.ifname='usb0'
+    uci set network.wan.disabled='0'
+    uci set network.wan.proto='lte'
+    uci set network.wan.service='AUTO'
+    uci set network.wan.auth_type='none'
+    uci set network.wan.wan_multi='1'
+    uci set network.wan.apn="$TARGET_APN"
+    
+    uci commit network
+    print_success "UCI network configuration completed"
+}
+
+# Function to configure UCI wireless
+configure_uci_wireless() {
+    print_status "Configuring UCI wireless settings..."
+    
+    # WiFi interface
+    uci set wireless.wlan0=wifi-iface
+    uci set wireless.wlan0.enabled='1'
+    uci set wireless.wlan0.channel="$TARGET_WIFI_CHANNEL"
+    uci set wireless.wlan0.hwmode='g'
+    uci set wireless.wlan0.type='bcmdhd'
+    uci set wireless.wlan0.encryption='wpa2psk'
+    uci set wireless.wlan0.ssid="$TARGET_WIFI_SSID"
+    uci set wireless.wlan0.key="$TARGET_WIFI_PASSWORD"
+    
+    uci commit wireless
+    print_success "UCI wireless configuration completed"
+}
+
+# Function to restart UCI services
+restart_uci_services() {
+    print_status "Restarting UCI services..."
+    
+    # Restart network
+    /etc/init.d/network restart
+    
+    # Restart wireless
+    /etc/init.d/network restart
+    
+    print_success "UCI services restarted"
+}
+
+# =============================================================================
+# CONFIGURATION FUNCTIONS
+# =============================================================================
+
+# Function to configure serial ports
+configure_serial_ports() {
+    print_status "Configuring serial port permissions..."
+    
+    # Create udev rules for serial ports
+    cat <<EOL | sudo tee /etc/udev/rules.d/99-serial.rules
+KERNEL=="ttyS0", MODE="0666"
+KERNEL=="ttyS3", MODE="0666"
+EOL
+    
+    # Reload udev rules
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    
+    print_success "Serial port permissions configured"
+}
+
+# Function to verify all installations
+verify_installation() {
+    print_status "Verifying installation..."
+    
+    # Wait for services to start
+    sleep 10
+    
+    # Check Docker service
+    if systemctl is-active --quiet docker; then
+        print_success "Docker service is running"
+    else
+        print_error "Docker service is not running"
+        return 1
+    fi
+    
+    # Check Node-RED
+    if sudo systemctl is-active --quiet nodered; then
+        print_success "Node-RED service is running"
+    else
+        print_error "Node-RED service is not running"
+        return 1
+    fi
+    
+    # Check Tailscale
+    if sudo systemctl is-active --quiet tailscaled; then
+        print_success "Tailscale service is running"
+    else
+        print_error "Tailscale service is not running"
+        return 1
+    fi
+    
+    # Apply Docker group membership for verification
+    newgrp docker << EOFNEWGRP
+    # Check containers
+    if docker ps | grep -q portainer; then
+        print_success "Portainer container is running"
+    else
+        print_error "Portainer container is not running"
+        return 1
+    fi
+    
+    if docker ps | grep -q restreamer; then
+        print_success "Restreamer container is running"
+    else
+        print_error "Restreamer container is not running"
+        return 1
+    fi
+EOFNEWGRP
+    
+    # Get server IP
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    
+    print_success "Installation verification completed"
+    echo
+    print_status "=== SERVICE ACCESS INFORMATION ==="
+    echo -e "${GREEN}Node-RED:${NC} http://$SERVER_IP:1880"
+    echo -e "${GREEN}Portainer (Container Management):${NC}"
+    echo -e "  HTTP:  http://$SERVER_IP:9000"
+    echo -e "  HTTPS: https://$SERVER_IP:9443"
+    echo -e "${GREEN}Restreamer (Streaming Service):${NC}"
+    echo -e "  HTTP:  http://$SERVER_IP:8080"
+    echo -e "  Username: $RESTREAMER_USERNAME"
+    echo -e "  Password: $RESTREAMER_PASSWORD"
+    echo -e "${GREEN}Tailscale:${NC} Check status with 'sudo tailscale status'"
+    echo
+    print_status "=== MANAGEMENT COMMANDS ==="
+    echo -e "${BLUE}Node-RED status:${NC} sudo systemctl status nodered"
+    echo -e "${BLUE}Node-RED logs:${NC} sudo journalctl -u nodered -f"
+    echo -e "${BLUE}Docker containers:${NC} docker ps"
+    echo -e "${BLUE}Docker logs:${NC} docker logs [container_name]"
+    echo -e "${BLUE}Tailscale status:${NC} sudo tailscale status"
+    echo -e "${BLUE}Management script:${NC} /opt/portainer/manage-services.sh"
+}
+
+# Function to prompt for reboot
+prompt_reboot() {
+    echo
+    print_warning "Installation completed successfully!"
+    print_status "A system reboot is recommended to ensure all changes take effect."
+    echo
+    read -p "Do you want to reboot now? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_status "Rebooting system..."
+        sudo reboot
+    else
+        print_status "Reboot skipped. Please reboot manually when convenient."
+        print_warning "Run 'sudo reboot' when ready to complete the setup."
+    fi
+}
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+main() {
+    echo "=========================================="
+    echo "  Complete Infrastructure Setup Script"
+    echo "  with UCI Configuration"
+    echo "=========================================="
+    echo
+    
+    # Pre-flight checks
+    check_root
+    check_sudo
+    detect_architecture
+    
+    # Check if OpenWrt and get UCI configuration
+    IS_OPENWRT=false
+    if check_openwrt; then
+        IS_OPENWRT=true
+        if get_uci_configuration; then
+            print_success "UCI configuration will be applied"
+        else
+            print_warning "UCI configuration skipped"
+        fi
+    else
+        print_warning "Not an OpenWrt system. UCI configuration will be skipped."
+    fi
+    
+    # Part 1: Node-RED and Tailscale Setup
+    print_section "PART 1: NODE-RED AND TAILSCALE SETUP"
+    copy_flows_to_script
+    update_system
+    install_dependencies
+    install_nvm
+    install_nodejs
+    install_nodered
+    install_nodered_nodes
+    create_nodered_systemd_service
+    start_nodered
+    import_flows
+    install_tailscale
+    configure_serial_ports
+    
+    # Part 2: Docker Services Setup
+    print_section "PART 2: DOCKER SERVICES SETUP"
+    install_docker
+    create_docker_directories
+    create_portainer_compose
+    create_restreamer_compose
+    start_docker_services
+    create_management_scripts
+    
+    # Part 3: UCI Configuration (if OpenWrt)
+    if [ "$IS_OPENWRT" = true ]; then
+        print_section "PART 3: UCI CONFIGURATION"
+        backup_uci_config
+        configure_uci_system
+        configure_uci_password
+        configure_uci_network
+        configure_uci_wireless
+        restart_uci_services
+    fi
+    
+    # Final verification
+    print_section "FINAL VERIFICATION"
+    verify_installation
+    
+    echo
+    echo "=========================================="
+    print_success "Complete Infrastructure Setup Completed!"
+    echo "=========================================="
+    echo
+    print_warning "IMPORTANT: Docker group membership has been applied automatically during setup."
+    print_warning "If you encounter permission issues in future sessions, run: newgrp docker"
+    echo
+    print_status "Management scripts created:"
+    echo "  - /opt/portainer/manage-services.sh"
+    echo "  - /opt/portainer/backup-services.sh"
+    echo
+    print_status "Next steps:"
+    echo "  1. Access Node-RED at: http://$(hostname -I | awk '{print $1}'):1880"
+    echo "  2. Access Portainer at: http://$(hostname -I | awk '{print $1}'):9000"
+    echo "  3. Access Restreamer at: http://$(hostname -I | awk '{print $1}'):8080"
+    echo "  4. Configure Tailscale with: sudo tailscale up"
+    if [ "$IS_OPENWRT" = true ]; then
+        echo "  5. UCI configuration applied with hostname: $TARGET_HOSTNAME"
+        echo "  6. WiFi SSID: $TARGET_WIFI_SSID"
+        echo "  7. LAN IP: $TARGET_LAN_IP"
+    fi
+    echo "  8. Use management scripts for service control"
+    
+    # Prompt for reboot
+    prompt_reboot
+}
+
+# Run main function
+main "$@"
