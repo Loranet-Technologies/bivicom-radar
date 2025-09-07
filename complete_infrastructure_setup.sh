@@ -39,6 +39,9 @@ TARGET_LAN_MAC="00:52:24:4d:d8:cc"
 TARGET_WIFI_SSID=""
 TARGET_WIFI_PASSWORD="1qaz2wsx"
 TARGET_WIFI_CHANNEL="10"
+TARGET_TIMEZONE="GMT-8"
+TARGET_ZONENAME="(GMT+08:00) Beijing, Chongqing, Hong Kong, Urumqi"
+TARGET_MODEL="TG451-STD"
 TARGET_APN="Max4g"
 
 echo "************************************************"
@@ -101,30 +104,220 @@ check_openwrt() {
     return 0
 }
 
-# Function to get user input with default value
+# Function to get user input with default
 get_user_input() {
     local prompt="$1"
     local default="$2"
     local var_name="$3"
     
     if [ -n "$default" ]; then
-        echo -e "${BLUE}[INPUT]${NC} $prompt (default: $default): "
-        read -r input
-        if [ -z "$input" ]; then
-            input="$default"
-        fi
+        read -p "$prompt [$default]: " -r input
+        eval "$var_name=\"\${input:-$default}\""
     else
-        echo -e "${BLUE}[INPUT]${NC} $prompt: "
-        read -r input
-        while [ -z "$input" ]; do
-            print_error "This field is required. Please enter a value."
-            echo -e "${BLUE}[INPUT]${NC} $prompt: "
-            read -r input
+        read -p "$prompt: " -r input
+        eval "$var_name=\"$input\""
+    fi
+}
+
+# Function to validate IP address
+validate_ip() {
+    local ip="$1"
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        local IFS='.'
+        local -a ip_parts=($ip)
+        for part in "${ip_parts[@]}"; do
+            if ((part > 255)); then
+                return 1
+            fi
         done
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to get UCI configuration from user
+get_uci_configuration() {
+    print_section "UCI CONFIGURATION SETUP"
+    print_status "This will configure your OpenWrt system with custom settings."
+    echo
+    
+    # Get hostname
+    get_user_input "Enter hostname" "router" "TARGET_HOSTNAME"
+    
+    # Get LAN IP
+    while true; do
+        get_user_input "Enter LAN IP address" "192.168.14.1" "TARGET_LAN_IP"
+        if validate_ip "$TARGET_LAN_IP"; then
+            break
+        else
+            print_error "Invalid IP address format. Please try again."
+        fi
+    done
+    
+    # Get WiFi password
+    get_user_input "Enter WiFi password" "1qaz2wsx" "TARGET_WIFI_PASSWORD"
+    
+    # Get WiFi channel
+    get_user_input "Enter WiFi channel" "10" "TARGET_WIFI_CHANNEL"
+    
+    # Get APN
+    get_user_input "Enter APN for LTE" "Max4g" "TARGET_APN"
+    
+    # Set WiFi SSID to hostname
+    TARGET_WIFI_SSID="$TARGET_HOSTNAME"
+    
+    # Display summary
+    echo
+    print_section "CONFIGURATION SUMMARY"
+    print_status "Hostname: $TARGET_HOSTNAME"
+    print_status "LAN IP: $TARGET_LAN_IP"
+    print_status "WiFi SSID: $TARGET_WIFI_SSID"
+    print_status "WiFi Password: $TARGET_WIFI_PASSWORD"
+    print_status "WiFi Channel: $TARGET_WIFI_CHANNEL"
+    print_status "APN: $TARGET_APN"
+    echo
+    
+    # Confirmation
+    read -p "Do you want to apply this configuration? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        return 0
+    else
+        print_warning "UCI configuration cancelled."
+        return 1
+    fi
+}
+
+# Function to backup UCI configuration
+backup_uci_config() {
+    print_status "Backing up current UCI configuration..."
+    
+    local backup_dir="/etc/uci-backup-$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    
+    # Backup all UCI configs
+    for config in /etc/config/*; do
+        if [ -f "$config" ]; then
+            cp "$config" "$backup_dir/"
+        fi
+    done
+    
+    print_success "UCI configuration backed up to: $backup_dir"
+}
+
+# Function to configure UCI system settings
+configure_uci_system() {
+    print_status "Configuring UCI system settings..."
+    
+    uci set system.system.hostname="$TARGET_HOSTNAME"
+    uci set system.system.timezone="$TARGET_TIMEZONE"
+    uci set system.system.zonename="$TARGET_ZONENAME"
+    uci set system.system.model="$TARGET_MODEL"
+    uci set system.system.enable_212='1'
+    uci set system.system.dual_sim='0'
+    uci set system.system.sms_password='admin'
+    
+    # Configure NTP servers
+    uci delete system.ntp.server 2>/dev/null || true
+    uci add_list system.ntp.server='0.openwrt.pool.ntp.org'
+    uci add_list system.ntp.server='1.openwrt.pool.ntp.org'
+    uci add_list system.ntp.server='2.openwrt.pool.ntp.org'
+    uci add_list system.ntp.server='3.openwrt.pool.ntp.org'
+    
+    # Configure access settings
+    uci set system.access.enable_telnet='1'
+    uci set system.access.enable_ssh='0'
+    
+    uci commit system
+    print_success "UCI system configuration completed"
+}
+
+# Function to configure UCI password
+configure_uci_password() {
+    print_status "Configuring UCI user password..."
+    
+    uci set system.system.password='1qaz2wsx'
+    echo "root:1qaz2wsx" | chpasswd 2>/dev/null || {
+        print_warning "Could not set password using chpasswd, trying alternative method..."
+        PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
+        if [ -n "$PASSWORD_HASH" ]; then
+            uci set system.system.password="$PASSWORD_HASH"
+            print_success "Password hash set via UCI"
+        else
+            print_warning "Could not generate password hash, password may need to be set manually"
+        fi
+    }
+    uci commit system
+    
+    if [ -w "/etc/shadow" ]; then
+        PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
+        if [ -n "$PASSWORD_HASH" ]; then
+            sed -i "s|^root:.*|root:$PASSWORD_HASH:0:0:99999:7:::|" /etc/shadow 2>/dev/null || true
+            print_success "Password set in /etc/shadow"
+        fi
     fi
     
-    eval "$var_name='$input'"
+    print_success "UCI user password configuration completed"
+    print_status "Username: admin/root"
+    print_status "Password: 1qaz2wsx"
 }
+
+# Function to configure UCI network settings
+configure_uci_network() {
+    print_status "Configuring UCI network settings..."
+    
+    # Configure LAN interface
+    uci set network.lan.proto='static'
+    uci set network.lan.ipaddr="$TARGET_LAN_IP"
+    uci set network.lan.netmask="$TARGET_LAN_NETMASK"
+    uci set network.lan.macaddr="$TARGET_LAN_MAC"
+    uci set network.lan.ifname='eth0 eth1'
+    uci set network.lan.type='bridge'
+    uci set network.lan.dns='8.8.8.8'
+    
+    # Configure WAN interface
+    uci set network.wan.proto='3g'
+    uci set network.wan.device='/dev/ttyUSB0'
+    uci set network.wan.service='umts'
+    uci set network.wan.apn="$TARGET_APN"
+    uci set network.wan.pincode=''
+    uci set network.wan.username=''
+    uci set network.wan.password=''
+    uci set network.wan.ifname='usb0'
+    
+    uci commit network
+    print_success "UCI network configuration completed"
+}
+
+# Function to configure UCI wireless settings
+configure_uci_wireless() {
+    print_status "Configuring UCI wireless settings..."
+    
+    # Configure wireless interface
+    uci set wireless.wlan0.enabled='1'
+    uci set wireless.wlan0.channel="$TARGET_WIFI_CHANNEL"
+    uci set wireless.wlan0.hwmode='g'
+    uci set wireless.wlan0.type='bcmdhd'
+    uci set wireless.wlan0.encryption='wpa2psk'
+    uci set wireless.wlan0.ssid="$TARGET_WIFI_SSID"
+    uci set wireless.wlan0.key="$TARGET_WIFI_PASSWORD"
+    
+    uci commit wireless
+    print_success "UCI wireless configuration completed"
+}
+
+# Function to restart UCI services
+restart_uci_services() {
+    print_status "Restarting UCI services..."
+    
+    /etc/init.d/network reload
+    /etc/init.d/firewall reload
+    /etc/init.d/dnsmasq reload
+    
+    print_success "UCI services restarted"
+}
+
 
 # Function to validate IP address
 validate_ip() {
