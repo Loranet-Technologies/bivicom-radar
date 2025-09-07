@@ -1451,10 +1451,22 @@ main() {
     IS_OPENWRT=false
     if check_openwrt; then
         IS_OPENWRT=true
-        if get_uci_configuration; then
-            print_success "UCI configuration will be applied"
+        # Check if we're in auto-run mode
+        if [[ "$1" == "--auto" || "$1" == "-y" || "$1" == "--yes" ]]; then
+            print_status "Auto-run mode: Using default UCI configuration"
+            TARGET_HOSTNAME="router"
+            TARGET_LAN_IP="192.168.14.1"
+            TARGET_WIFI_SSID="router"
+            TARGET_WIFI_PASSWORD="1qaz2wsx"
+            TARGET_WIFI_CHANNEL="10"
+            TARGET_APN="Max4g"
+            print_success "UCI configuration will be applied with default values"
         else
-            print_warning "UCI configuration skipped"
+            if get_uci_configuration; then
+                print_success "UCI configuration will be applied"
+            else
+                print_warning "UCI configuration skipped"
+            fi
         fi
     else
         print_warning "Not an OpenWrt system. UCI configuration will be skipped."
