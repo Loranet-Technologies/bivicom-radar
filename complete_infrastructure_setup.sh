@@ -346,61 +346,6 @@ validate_ip() {
     fi
 }
 
-# Function to get UCI configuration from user
-get_uci_configuration() {
-    echo
-    echo "=========================================="
-    echo "  UCI Configuration Input"
-    echo "=========================================="
-    echo
-    
-    # Get hostname
-    get_user_input "Enter hostname for the device" "router" "TARGET_HOSTNAME"
-    
-    # Get local IP address
-    while true; do
-        get_user_input "Enter local IP address (e.g., 192.168.1.1)" "192.168.14.1" "TARGET_LAN_IP"
-        if validate_ip "$TARGET_LAN_IP"; then
-            break
-        else
-            print_error "Invalid IP address format. Please enter a valid IP address."
-        fi
-    done
-    
-    # Set WiFi SSID to hostname
-    TARGET_WIFI_SSID="$TARGET_HOSTNAME"
-    print_status "WiFi SSID will be set to: $TARGET_WIFI_SSID"
-    
-    # Get WiFi password
-    get_user_input "Enter WiFi password" "1qaz2wsx" "TARGET_WIFI_PASSWORD"
-    
-    # Get WiFi channel
-    get_user_input "Enter WiFi channel (1-11 for 2.4GHz)" "10" "TARGET_WIFI_CHANNEL"
-    
-    # Get APN (for LTE)
-    get_user_input "Enter LTE APN" "Max4g" "TARGET_APN"
-    
-    echo
-    print_status "=== UCI Configuration Summary ==="
-    echo "Hostname: $TARGET_HOSTNAME"
-    echo "Local IP: $TARGET_LAN_IP"
-    echo "WiFi SSID: $TARGET_WIFI_SSID"
-    echo "WiFi Password: $TARGET_WIFI_PASSWORD"
-    echo "WiFi Channel: $TARGET_WIFI_CHANNEL"
-    echo "LTE APN: $TARGET_APN"
-    echo
-    
-    # Confirm configuration
-    echo -e "${YELLOW}[CONFIRM]${NC} Do you want to proceed with this UCI configuration? (y/N): "
-    read -r confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        print_warning "UCI configuration cancelled by user."
-        return 1
-    fi
-    
-    print_success "UCI configuration confirmed. Proceeding with setup..."
-    return 0
-}
 
 # Function to detect system architecture
 detect_architecture() {
