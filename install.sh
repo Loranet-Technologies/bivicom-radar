@@ -105,14 +105,20 @@ download_and_setup() {
     print_warning "The installation will take several minutes and may require a reboot."
     echo
     
-    # Ask for confirmation
-    read -p "Do you want to proceed with the installation? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_warning "Installation cancelled by user."
-        print_status "You can run the script manually later:"
-        print_status "  cd $INSTALL_DIR && ./complete_infrastructure_setup.sh"
-        exit 0
+    # Check for auto-run flag
+    if [[ "$1" == "--auto" || "$1" == "-y" || "$1" == "--yes" ]]; then
+        print_status "Auto-run mode enabled. Proceeding with installation..."
+    else
+        # Ask for confirmation
+        read -p "Do you want to proceed with the installation? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_warning "Installation cancelled by user."
+            print_status "You can run the script manually later:"
+            print_status "  cd $INSTALL_DIR && ./complete_infrastructure_setup.sh"
+            print_status "Or use auto-run: curl -sSL $SCRIPT_URL | bash -s -- --auto"
+            exit 0
+        fi
     fi
     
     # Run the setup script
@@ -130,11 +136,14 @@ show_help() {
     echo "  -h, --help     Show this help message"
     echo "  -d, --download Download only (don't run installation)"
     echo "  -v, --version  Show version information"
+    echo "  -y, --yes, --auto  Auto-run without confirmation"
     echo
     echo "Examples:"
     echo "  $0                    # Download and run installation"
     echo "  $0 --download         # Download only"
+    echo "  $0 --auto             # Auto-run without confirmation"
     echo "  curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash"
+    echo "  curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash -s -- --auto"
     echo
     echo "Repository: $REPO_URL"
     echo "Author: Aqmar"
