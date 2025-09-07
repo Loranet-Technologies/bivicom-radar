@@ -1186,6 +1186,7 @@ show_help() {
     echo "Options:"
     echo "  -h, --help          Show this help message"
     echo "  -v, --version       Show version information"
+    echo "  --auto, -y, --yes   Auto-run without confirmation"
     echo "  --skip-uci          Skip UCI configuration"
     echo "  --skip-docker       Skip Docker services setup"
     echo "  --skip-nodered      Skip Node-RED setup"
@@ -1244,6 +1245,10 @@ handle_arguments() {
                     exit 1
                 fi
                 exit 0
+                ;;
+            --auto|-y|--yes)
+                print_status "Auto-run mode enabled. Proceeding with installation..."
+                shift
                 ;;
             --skip-uci)
                 print_warning "UCI configuration will be skipped"
