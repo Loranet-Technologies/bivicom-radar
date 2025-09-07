@@ -190,8 +190,7 @@ get_uci_configuration() {
     echo
     
     # Confirmation
-    read -p "Do you want to apply this configuration? (y/N): " -n 1 -r
-    echo
+    read -p "Do you want to apply this configuration? (y/N): " -r
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         return 0
     else
