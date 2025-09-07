@@ -435,23 +435,151 @@ copy_flows_to_script() {
     fi
 }
 
+# Function to backup existing Node-RED flows
+backup_nodered_flows() {
+    print_status "Backing up existing Node-RED flows..."
+    
+    if [ -f "$NODERED_HOME/.node-red/flows.json" ]; then
+        # Create backup with timestamp
+        BACKUP_FILE="$NODERED_HOME/.node-red/flows_$(date +%Y%m%d_%H%M%S).json"
+        cp "$NODERED_HOME/.node-red/flows.json" "$BACKUP_FILE"
+        print_success "Flows backed up to: $BACKUP_FILE"
+        
+        # Also create a standard backup
+        cp "$NODERED_HOME/.node-red/flows.json" "$NODERED_HOME/.node-red/.flows.json.backup"
+        print_success "Standard backup created: .flows.json.backup"
+    else
+        print_warning "No existing flows.json found to backup"
+    fi
+}
+
+# Function to validate Node-RED flows
+validate_nodered_flows() {
+    local flows_file="$1"
+    
+    if [ ! -f "$flows_file" ]; then
+        print_error "Flows file not found: $flows_file"
+        return 1
+    fi
+    
+    # Check if file is too small (likely empty or corrupted)
+    local file_size=$(stat -c%s "$flows_file" 2>/dev/null || echo "0")
+    if [ "$file_size" -lt 1000 ]; then
+        print_warning "Flows file is very small ($file_size bytes), may be empty or corrupted"
+        return 1
+    fi
+    
+    # Try to parse JSON
+    if ! python3 -c "import json; json.load(open('$flows_file'))" 2>/dev/null; then
+        print_error "Flows file contains invalid JSON"
+        return 1
+    fi
+    
+    # Check for flow tabs
+    local tab_count=$(python3 -c "
+import json
+try:
+    with open('$flows_file', 'r') as f:
+        flows = json.load(f)
+    tabs = [flow for flow in flows if flow.get('type') == 'tab']
+    print(len(tabs))
+except:
+    print(0)
+" 2>/dev/null || echo "0")
+    
+    if [ "$tab_count" -eq 0 ]; then
+        print_warning "No flow tabs found in flows file"
+        return 1
+    fi
+    
+    print_success "Flows validation passed: $tab_count tabs found"
+    return 0
+}
+
+# Function to restore flows from backup
+restore_nodered_flows() {
+    print_status "Attempting to restore Node-RED flows from backup..."
+    
+    # Stop Node-RED
+    sudo systemctl stop nodered 2>/dev/null || true
+    
+    # Look for backup files
+    local backup_files=(
+        "$NODERED_HOME/.node-red/.flows.json.backup"
+        "$NODERED_HOME/.node-red/flows_$(date +%Y%m%d)*.json"
+        "$NODERED_HOME/.node-red/flows_*.json"
+    )
+    
+    local restored=false
+    for backup_pattern in "${backup_files[@]}"; do
+        for backup_file in $backup_pattern; do
+            if [ -f "$backup_file" ] && validate_nodered_flows "$backup_file"; then
+                print_status "Restoring flows from: $(basename "$backup_file")"
+                cp "$backup_file" "$NODERED_HOME/.node-red/flows.json"
+                sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
+                restored=true
+                break 2
+            fi
+        done
+    done
+    
+    if [ "$restored" = true ]; then
+        print_success "Flows restored from backup"
+    else
+        print_warning "No valid backup found, will use default flows"
+    fi
+    
+    # Restart Node-RED
+    sudo systemctl start nodered
+    sleep 5
+    
+    if sudo systemctl is-active --quiet nodered; then
+        print_success "Node-RED restarted successfully"
+    else
+        print_error "Failed to restart Node-RED"
+        return 1
+    fi
+}
+
 # Function to import flows
 import_flows() {
-    print_status "Importing Node-RED flows from local backup..."
+    print_status "Setting up Node-RED flows with enhanced validation..."
+    
+    # First, backup any existing flows
+    backup_nodered_flows
     
     # Stop Node-RED temporarily
-    sudo systemctl stop nodered
+    sudo systemctl stop nodered 2>/dev/null || true
     
     # Get the script directory
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     
-    # Copy flows from script directory
+    local flows_imported=false
+    
+    # Check if we have local flows to use
     if [ -f "$SCRIPT_DIR/nodered_flows/flows.json" ]; then
-        cp "$SCRIPT_DIR/nodered_flows/flows.json" "$NODERED_HOME/.node-red/flows.json"
-        print_success "Flows copied from local backup"
-    else
-        print_warning "Local flows not found, creating default flows"
-        # Create a basic flows.json if local backup doesn't exist
+        print_status "Found local flows, validating..."
+        
+        # Validate local flows
+        if validate_nodered_flows "$SCRIPT_DIR/nodered_flows/flows.json"; then
+            cp "$SCRIPT_DIR/nodered_flows/flows.json" "$NODERED_HOME/.node-red/flows.json"
+            print_success "Local flows imported successfully"
+            flows_imported=true
+        else
+            print_warning "Local flows validation failed, trying backup restoration..."
+        fi
+    fi
+    
+    # If local flows failed or don't exist, try to restore from backup
+    if [ "$flows_imported" = false ]; then
+        print_warning "Local flows not available, checking for existing backups..."
+        restore_nodered_flows
+        flows_imported=true
+    fi
+    
+    # If still no flows, create default
+    if [ "$flows_imported" = false ]; then
+        print_warning "No valid flows found, creating default flows"
         cat > "$NODERED_HOME/.node-red/flows.json" << 'EOF'
 [
     {
@@ -459,7 +587,7 @@ import_flows() {
         "type": "tab",
         "label": "Default Flow",
         "disabled": false,
-        "info": "Default Node-RED flow"
+        "info": "Default Node-RED flow - please import your custom flows"
     }
 ]
 EOF
@@ -474,6 +602,13 @@ EOF
     # Set proper ownership
     sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
     sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/package.json" 2>/dev/null || true
+    
+    # Final validation
+    if validate_nodered_flows "$NODERED_HOME/.node-red/flows.json"; then
+        print_success "Node-RED flows setup completed successfully"
+    else
+        print_warning "Flows validation failed, but Node-RED will start with default flow"
+    fi
     
     # Restart Node-RED
     sudo systemctl start nodered
@@ -903,6 +1038,47 @@ EOL
     print_success "Serial port permissions configured"
 }
 
+# Function to check and fix Node-RED flow issues
+check_nodered_flows() {
+    print_status "Checking Node-RED flows for issues..."
+    
+    if [ ! -f "$NODERED_HOME/.node-red/flows.json" ]; then
+        print_error "Node-RED flows file not found"
+        return 1
+    fi
+    
+    # Check if flows are empty or corrupted
+    if ! validate_nodered_flows "$NODERED_HOME/.node-red/flows.json"; then
+        print_warning "Node-RED flows validation failed, attempting to fix..."
+        
+        # Try to restore from backup
+        if restore_nodered_flows; then
+            print_success "Node-RED flows restored from backup"
+            return 0
+        else
+            print_error "Failed to restore Node-RED flows"
+            return 1
+        fi
+    fi
+    
+    # Check if Node-RED is running
+    if ! sudo systemctl is-active --quiet nodered; then
+        print_warning "Node-RED service is not running, attempting to start..."
+        sudo systemctl start nodered
+        sleep 5
+        
+        if sudo systemctl is-active --quiet nodered; then
+            print_success "Node-RED service started successfully"
+        else
+            print_error "Failed to start Node-RED service"
+            return 1
+        fi
+    fi
+    
+    print_success "Node-RED flows check completed successfully"
+    return 0
+}
+
 # Function to verify all installations
 verify_installation() {
     print_status "Verifying installation..."
@@ -921,6 +1097,13 @@ verify_installation() {
     # Check Node-RED
     if sudo systemctl is-active --quiet nodered; then
         print_success "Node-RED service is running"
+        
+        # Check Node-RED flows
+        if check_nodered_flows; then
+            print_success "Node-RED flows are valid and working"
+        else
+            print_warning "Node-RED flows have issues but service is running"
+        fi
     else
         print_error "Node-RED service is not running"
         return 1
@@ -994,14 +1177,114 @@ prompt_reboot() {
     fi
 }
 
+# Function to show help
+show_help() {
+    echo "Complete Infrastructure Setup Script with UCI Configuration"
+    echo
+    echo "Usage: $0 [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  -h, --help          Show this help message"
+    echo "  -v, --version       Show version information"
+    echo "  --skip-uci          Skip UCI configuration"
+    echo "  --skip-docker       Skip Docker services setup"
+    echo "  --skip-nodered      Skip Node-RED setup"
+    echo "  --skip-tailscale    Skip Tailscale setup"
+    echo "  --fix-nodered       Fix Node-RED flow issues"
+    echo "  --check-flows       Check and validate Node-RED flows"
+    echo
+    echo "This script will install:"
+    echo "  • Node-RED with custom flows and validation"
+    echo "  • Tailscale VPN"
+    echo "  • Docker & Docker Compose"
+    echo "  • Portainer (Container Management)"
+    echo "  • Restreamer (Video Streaming)"
+    echo "  • UCI Configuration (OpenWrt)"
+    echo
+    echo "New Features:"
+    echo "  • Automatic flow backup and restoration"
+    echo "  • Flow validation and error detection"
+    echo "  • Enhanced error handling and recovery"
+    echo
+    echo "Author: Aqmar"
+    echo "Repository: https://github.com/Loranet-Technologies/bivicom-radar"
+}
+
+# Function to show version
+show_version() {
+    echo "Complete Infrastructure Setup Script v2.0"
+    echo "Author: Aqmar"
+    echo "Date: $(date +%Y-%m-%d)"
+    echo "Repository: https://github.com/Loranet-Technologies/bivicom-radar"
+}
+
+# Function to handle command line arguments
+handle_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            -v|--version)
+                show_version
+                exit 0
+                ;;
+            --fix-nodered)
+                print_section "FIXING NODE-RED FLOWS"
+                check_nodered_flows
+                exit 0
+                ;;
+            --check-flows)
+                print_section "CHECKING NODE-RED FLOWS"
+                if validate_nodered_flows "$NODERED_HOME/.node-red/flows.json"; then
+                    print_success "Node-RED flows are valid"
+                else
+                    print_error "Node-RED flows have issues"
+                    exit 1
+                fi
+                exit 0
+                ;;
+            --skip-uci)
+                print_warning "UCI configuration will be skipped"
+                SKIP_UCI=true
+                shift
+                ;;
+            --skip-docker)
+                print_warning "Docker services setup will be skipped"
+                SKIP_DOCKER=true
+                shift
+                ;;
+            --skip-nodered)
+                print_warning "Node-RED setup will be skipped"
+                SKIP_NODERED=true
+                shift
+                ;;
+            --skip-tailscale)
+                print_warning "Tailscale setup will be skipped"
+                SKIP_TAILSCALE=true
+                shift
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
 # =============================================================================
 # MAIN EXECUTION
 # =============================================================================
 
 main() {
+    # Handle command line arguments first
+    handle_arguments "$@"
+    
     echo "=========================================="
     echo "  Complete Infrastructure Setup Script"
-    echo "  with UCI Configuration"
+    echo "  with UCI Configuration v2.0"
     echo "=========================================="
     echo
     

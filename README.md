@@ -28,7 +28,9 @@ chmod +x setup.sh
 ## 📋 Features
 
 ### Infrastructure Services
-- ✅ **Node-RED**: IoT platform with pre-configured flows
+- ✅ **Node-RED**: IoT platform with pre-configured flows and validation
+- ✅ **Flow Management**: Automatic backup, validation, and restoration
+- ✅ **Error Recovery**: Enhanced error handling and automatic fixes
 - ✅ **Tailscale**: VPN connectivity
 - ✅ **Docker**: Container runtime
 - ✅ **Portainer**: Container management UI
@@ -41,6 +43,39 @@ chmod +x setup.sh
 - ✅ **System Configuration**: Hostname, timezone, NTP
 - ✅ **User Password**: Admin/root password configuration
 - ✅ **Firewall Rules**: Comprehensive security configuration
+
+## 🆕 New Features (v2.0)
+
+### Enhanced Node-RED Flow Management
+- **Automatic Backup**: Creates timestamped backups before any changes
+- **Flow Validation**: Checks for corrupted or empty flow files
+- **Smart Restoration**: Automatically restores from backups when issues detected
+- **Error Detection**: Identifies and reports flow problems
+- **Recovery Tools**: Command-line options to fix flow issues
+
+### Command Line Options
+```bash
+# Show help
+./complete_infrastructure_setup.sh --help
+
+# Fix Node-RED flow issues
+./complete_infrastructure_setup.sh --fix-nodered
+
+# Check flow validity
+./complete_infrastructure_setup.sh --check-flows
+
+# Skip specific components
+./complete_infrastructure_setup.sh --skip-docker --skip-tailscale
+```
+
+### Flow Recovery Commands
+```bash
+# Fix blank or corrupted flows
+./complete_infrastructure_setup.sh --fix-nodered
+
+# Validate existing flows
+./complete_infrastructure_setup.sh --check-flows
+```
 
 ## 🛠️ Installation Process
 
