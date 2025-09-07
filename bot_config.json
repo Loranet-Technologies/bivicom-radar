@@ -1,0 +1,19 @@
+{
+  "network_range": "192.168.1.0/24",
+  "default_credentials": {
+    "username": "admin",
+    "password": "admin"
+  },
+  "target_mac_prefixes": [
+    "00:52:24",
+    "02:52:24",
+    "aa:bb:cc"
+  ],
+  "deployment_mode": "auto",
+  "ssh_timeout": 10,
+  "scan_timeout": 5,
+  "max_threads": 50,
+  "log_level": "INFO",
+  "backup_before_deploy": true,
+  "verify_deployment": true
+}
