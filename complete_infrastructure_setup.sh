@@ -270,8 +270,8 @@ get_uci_configuration() {
 backup_uci_config() {
     print_status "Backing up current UCI configuration..."
     
-    local backup_dir="/etc/uci-backup-$(date +%Y%m%d_%H%M%S)"
-    sudo mkdir -p "$backup_dir"
+    local backup_dir="/home/$USER/uci-backup-$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
     
     # Backup all UCI configs
     for config in /etc/config/*; do
@@ -1586,7 +1586,7 @@ create_installation_status_file() {
 ## 📁 Backup Locations
 
 ### UCI Backups
-- **Location:** /etc/uci-backup-* or /tmp/uci_backup_*
+- **Location:** /home/$USER/uci-backup-*
 - **Contents:** Complete UCI configuration backup
 
 ### Node-RED Backups
