@@ -1104,9 +1104,14 @@ start_docker_services() {
     
     # Wait for Restreamer to start
     sleep 3
-    
-    print_success "Docker services started"
 EOFNEWGRP
+    
+    # Check if services started successfully
+    if docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "(portainer|restreamer)" >/dev/null 2>&1; then
+        print_success "Docker services started successfully"
+    else
+        print_warning "Docker services may not have started properly"
+    fi
 }
 
 # Function to create management scripts
@@ -1575,9 +1580,8 @@ verify_installation() {
         return 1
     fi
     
-    # Apply Docker group membership for verification
-    newgrp docker << EOFNEWGRP
-    # Check containers
+    # Check Docker containers
+    print_status "Checking Docker containers..."
     if docker ps | grep -q portainer; then
         print_success "Portainer container is running"
     else
@@ -1591,7 +1595,6 @@ verify_installation() {
         print_error "Restreamer container is not running"
         return 1
     fi
-EOFNEWGRP
     
     # Get server IP
     SERVER_IP=$(hostname -I | awk '{print $1}')
