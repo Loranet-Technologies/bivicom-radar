@@ -115,6 +115,83 @@ check_openwrt() {
     return 0
 }
 
+# Function to check if services are already installed
+check_existing_services() {
+    print_status "Checking for existing installations..."
+    
+    local services_installed=()
+    local services_missing=()
+    
+    # Check Docker
+    if command -v docker >/dev/null 2>&1 && systemctl is-active --quiet docker; then
+        services_installed+=("Docker")
+        print_success "✓ Docker is already installed and running"
+    else
+        services_missing+=("Docker")
+        print_warning "✗ Docker is not installed or not running"
+    fi
+    
+    # Check Node-RED
+    if command -v node-red >/dev/null 2>&1 && sudo systemctl is-active --quiet nodered; then
+        services_installed+=("Node-RED")
+        print_success "✓ Node-RED is already installed and running"
+    else
+        services_missing+=("Node-RED")
+        print_warning "✗ Node-RED is not installed or not running"
+    fi
+    
+    # Check Tailscale
+    if command -v tailscale >/dev/null 2>&1 && sudo systemctl is-active --quiet tailscaled; then
+        services_installed+=("Tailscale")
+        print_success "✓ Tailscale is already installed and running"
+    else
+        services_missing+=("Tailscale")
+        print_warning "✗ Tailscale is not installed or not running"
+    fi
+    
+    # Check Docker containers
+    local containers_running=0
+    if command -v docker >/dev/null 2>&1; then
+        if docker ps --format "{{.Names}}" | grep -q portainer; then
+            services_installed+=("Portainer")
+            print_success "✓ Portainer container is already running"
+            containers_running=$((containers_running + 1))
+        else
+            services_missing+=("Portainer")
+            print_warning "✗ Portainer container is not running"
+        fi
+        
+        if docker ps --format "{{.Names}}" | grep -q restreamer; then
+            services_installed+=("Restreamer")
+            print_success "✓ Restreamer container is already running"
+            containers_running=$((containers_running + 1))
+        else
+            services_missing+=("Restreamer")
+            print_warning "✗ Restreamer container is not running"
+        fi
+    fi
+    
+    # Summary
+    echo
+    print_status "=== INSTALLATION STATUS SUMMARY ==="
+    if [ ${#services_installed[@]} -gt 0 ]; then
+        print_success "Already installed: ${services_installed[*]}"
+    fi
+    
+    if [ ${#services_missing[@]} -gt 0 ]; then
+        print_warning "Need installation: ${services_missing[*]}"
+    fi
+    
+    # Return status
+    if [ ${#services_missing[@]} -eq 0 ]; then
+        print_success "All services are already installed and running!"
+        return 0  # All services installed
+    else
+        print_status "Some services need to be installed or started"
+        return 1  # Some services missing
+    fi
+}
+
 # Function to get user input with default
 get_user_input() {
     local prompt="$1"
@@ -355,12 +432,15 @@ install_dependencies() {
     # Note: System update and package fixing already done in update_system()
     # dnsmasq configuration already set in update_system()
     
-    # Check if Docker is already installed
-    if command -v docker >/dev/null 2>&1; then
-        echo "Docker is already installed, skipping Docker installation"
+    # Check if Docker is already installed and running
+    if command -v docker >/dev/null 2>&1 && systemctl is-active --quiet docker; then
+        print_success "Docker is already installed and running, skipping Docker installation"
+        DOCKER_ALREADY_INSTALLED=true
+    elif command -v docker >/dev/null 2>&1; then
+        print_warning "Docker is installed but not running, will start Docker service"
         DOCKER_ALREADY_INSTALLED=true
     else
-        echo "Docker not found, will install Docker"
+        print_status "Docker not found, will install Docker"
         DOCKER_ALREADY_INSTALLED=false
     fi
     
@@ -422,18 +502,24 @@ install_dependencies() {
     # Add current user to docker group (always do this)
     sudo usermod -aG docker $USER
     
-    # Enable and start Docker service
-    sudo systemctl enable docker
-    sudo systemctl start docker
-    
-    # Wait for Docker to fully start
-    sleep 5
-    
-    # Check Docker status
-    if sudo systemctl is-active --quiet docker; then
-        print_success "Docker service is running"
+    # Enable and start Docker service (only if not already running)
+    if ! systemctl is-active --quiet docker; then
+        print_status "Starting Docker service..."
+        sudo systemctl enable docker
+        sudo systemctl start docker
+        
+        # Wait for Docker to fully start
+        sleep 5
+        
+        # Check Docker status
+        if sudo systemctl is-active --quiet docker; then
+            print_success "Docker service is running"
+        else
+            print_error "Docker service failed to start"
+            exit 1
+        fi
     else
-        print_warning "Docker service may need manual start"
+        print_success "Docker service is already running"
     fi
     
     print_success "All dependencies and Docker setup completed"
@@ -502,9 +588,12 @@ install_nodejs() {
 install_nodered() {
     print_status "Installing Node-RED..."
     
-    # Check if Node-RED is already installed
-    if command -v node-red >/dev/null 2>&1; then
-        print_warning "Node-RED is already installed, skipping installation"
+    # Check if Node-RED is already installed and running
+    if command -v node-red >/dev/null 2>&1 && sudo systemctl is-active --quiet nodered; then
+        print_success "Node-RED is already installed and running, skipping installation"
+        return 0
+    elif command -v node-red >/dev/null 2>&1; then
+        print_warning "Node-RED is installed but not running, will start service later"
         return 0
     fi
     
@@ -976,6 +1065,23 @@ EOF
 install_tailscale() {
     print_status "Installing Tailscale..."
     
+    # Check if Tailscale is already installed and running
+    if command -v tailscale >/dev/null 2>&1 && sudo systemctl is-active --quiet tailscaled; then
+        print_success "Tailscale is already installed and running, skipping installation"
+        return 0
+    elif command -v tailscale >/dev/null 2>&1; then
+        print_warning "Tailscale is installed but not running, will start service"
+        sudo systemctl enable tailscaled
+        sudo systemctl start tailscaled
+        sleep 3
+        if sudo systemctl is-active --quiet tailscaled; then
+            print_success "Tailscale service started successfully"
+        else
+            print_warning "Tailscale service failed to start"
+        fi
+        return 0
+    fi
+    
     # Install Tailscale using official method
     curl -fsSL https://tailscale.com/install.sh | sh
     
@@ -1088,23 +1194,41 @@ EOF
 start_docker_services() {
     print_status "Starting Docker services..."
     
-    # Apply Docker group membership for current session
-    print_status "Applying Docker group membership..."
-    newgrp docker << EOFNEWGRP
-    # Start Portainer
-    cd $PORTAINER_DATA_DIR
-    docker compose up -d
+    # Check if containers are already running
+    local portainer_running=false
+    local restreamer_running=false
     
-    # Wait for Portainer to start
-    sleep 3
+    if docker ps --format "{{.Names}}" | grep -q portainer; then
+        portainer_running=true
+        print_success "Portainer container is already running"
+    fi
     
-    # Start Restreamer
-    cd $RESTREAMER_CONFIG_DIR
-    docker compose up -d
+    if docker ps --format "{{.Names}}" | grep -q restreamer; then
+        restreamer_running=true
+        print_success "Restreamer container is already running"
+    fi
     
-    # Wait for Restreamer to start
-    sleep 3
+    # Only start containers that are not already running
+    if [ "$portainer_running" = false ] || [ "$restreamer_running" = false ]; then
+        print_status "Starting Docker containers..."
+        newgrp docker << EOFNEWGRP
+        # Start Portainer (if not running)
+        if ! docker ps --format "{{.Names}}" | grep -q portainer; then
+            cd $PORTAINER_DATA_DIR
+            docker compose up -d
+            sleep 3
+        fi
+        
+        # Start Restreamer (if not running)
+        if ! docker ps --format "{{.Names}}" | grep -q restreamer; then
+            cd $RESTREAMER_CONFIG_DIR
+            docker compose up -d
+            sleep 3
+        fi
 EOFNEWGRP
+    else
+        print_success "All Docker containers are already running"
+    fi
     
     # Check if services started successfully
     if docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "(portainer|restreamer)" >/dev/null 2>&1; then
@@ -1652,6 +1776,7 @@ show_help() {
     echo "  -h, --help          Show this help message"
     echo "  -v, --version       Show version information"
     echo "  --auto, -y, --yes   Auto-run without confirmation"
+    echo "  --force             Force reinstall even if services exist"
     echo "  --skip-uci          Skip UCI configuration"
     echo "  --skip-docker       Skip Docker services setup"
     echo "  --skip-nodered      Skip Node-RED setup"
@@ -1725,6 +1850,11 @@ handle_arguments() {
                 AUTO_RUN_MODE=true
                 shift
                 ;;
+            --force)
+                print_warning "Force mode enabled. Will reinstall even if services exist."
+                FORCE_INSTALL=true
+                shift
+                ;;
             --skip-uci)
                 print_warning "UCI configuration will be skipped"
                 SKIP_UCI=true
@@ -1772,6 +1902,21 @@ main() {
     check_root
     check_sudo
     detect_architecture
+    
+    # Check existing services before installation (unless force mode)
+    if [ "$FORCE_INSTALL" != true ]; then
+        print_section "SERVICE STATUS CHECK"
+        if check_existing_services; then
+            print_success "All services are already installed and running!"
+            print_status "Installation complete. Use --help for management commands."
+            print_status "Use --force to reinstall even if services exist."
+            exit 0
+        fi
+    else
+        print_section "SERVICE STATUS CHECK (FORCE MODE)"
+        print_warning "Force mode enabled - checking services but will proceed with installation"
+        check_existing_services
+    fi
     
     # Check if OpenWrt and get UCI configuration
     IS_OPENWRT=false
