@@ -902,6 +902,8 @@ validate_nodered_flows() {
     local file_size=$(stat -f%z "$flows_file" 2>/dev/null || stat -c%s "$flows_file" 2>/dev/null || echo "0")
     if [ "$file_size" -lt 1000 ]; then
         print_warning "Flows file is very small ($file_size bytes), may be empty or corrupted"
+        print_status "File path: $flows_file"
+        print_status "File exists: $([ -f "$flows_file" ] && echo "yes" || echo "no")"
         return 1
     fi
     
@@ -949,12 +951,18 @@ restore_nodered_flows() {
     local restored=false
     for backup_pattern in "${backup_files[@]}"; do
         for backup_file in $backup_pattern; do
-            if [ -f "$backup_file" ] && validate_nodered_flows "$backup_file"; then
-                print_status "Restoring flows from: $(basename "$backup_file")"
-                cp "$backup_file" "$NODERED_HOME/.node-red/flows.json"
-                sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
-                restored=true
-                break 2
+            if [ -f "$backup_file" ]; then
+                # Check file size first to avoid validating tiny files
+                local backup_size=$(stat -f%z "$backup_file" 2>/dev/null || stat -c%s "$backup_file" 2>/dev/null || echo "0")
+                if [ "$backup_size" -gt 1000 ] && validate_nodered_flows "$backup_file"; then
+                    print_status "Restoring flows from: $(basename "$backup_file")"
+                    cp "$backup_file" "$NODERED_HOME/.node-red/flows.json"
+                    sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
+                    restored=true
+                    break 2
+                else
+                    print_warning "Skipping small/corrupted backup file: $(basename "$backup_file") ($backup_size bytes)"
+                fi
             fi
         done
     done
@@ -973,8 +981,55 @@ restore_nodered_flows() {
             return 1
         fi
     else
-        print_warning "No valid backup found, will use default flows"
-        return 1
+        print_warning "No valid backup found, creating default flows"
+        # Create a minimal default flow
+        cat > "$NODERED_HOME/.node-red/flows.json" << 'EOF'
+[
+    {
+        "id": "default-flow",
+        "type": "tab",
+        "label": "Default Flow",
+        "disabled": false,
+        "info": "Default flow created by installation script"
+    },
+    {
+        "id": "inject-node",
+        "type": "inject",
+        "z": "default-flow",
+        "name": "Hello World",
+        "props": [{"p": "payload"}],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "Hello World",
+        "payloadType": "str",
+        "x": 200,
+        "y": 100,
+        "wires": [["debug-node"]]
+    },
+    {
+        "id": "debug-node",
+        "type": "debug",
+        "z": "default-flow",
+        "name": "Debug Output",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 400,
+        "y": 100,
+        "wires": []
+    }
+]
+EOF
+        sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
+        print_success "Default flows created"
+        return 0
     fi
 }
 
