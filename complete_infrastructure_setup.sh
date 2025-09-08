@@ -370,7 +370,23 @@ install_dependencies() {
     sudo dpkg --configure -a 2>/dev/null || true
     sudo apt --fix-broken install -y 2>/dev/null || true
     
-    # Install packages with non-interactive frontend to prevent prompts
+    # Force remove dnsmasq if it's causing issues
+    sudo apt remove --purge -y dnsmasq 2>/dev/null || true
+    sudo apt autoremove -y 2>/dev/null || true
+    
+    # Remove old Docker installations
+    sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    
+    # Add Docker's official GPG key
+    sudo mkdir -p /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    
+    # Add Docker repository
+    echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
+    # Install all packages with non-interactive frontend to prevent prompts
     DEBIAN_FRONTEND=noninteractive sudo apt install -y \
         apt-transport-https \
         ca-certificates \
@@ -382,8 +398,24 @@ install_dependencies() {
         nano \
         htop \
         build-essential \
-        python3
-    print_success "Dependencies installed"
+        python3 \
+        docker-ce \
+        docker-ce-cli \
+        containerd.io \
+        docker-buildx-plugin \
+        docker-compose-plugin
+    
+    # Add current user to docker group
+    sudo usermod -aG docker $USER
+    
+    # Enable and start Docker service
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    
+    # Wait for Docker to fully start
+    sleep 5
+    
+    print_success "All dependencies and Docker installed"
 }
 
 # =============================================================================
@@ -803,36 +835,26 @@ EOF
 install_tailscale() {
     print_status "Installing Tailscale..."
     
-    # Download and run Tailscale installation script
-    curl -sSL https://raw.githubusercontent.com/iyon09/Bivocom-Node-RED-Tailscale-/main/DanLab_BV2.sh | bash
+    # Install Tailscale using official method
+    curl -fsSL https://tailscale.com/install.sh | sh
     
     # Wait for installation to complete
     sleep 5
     
-    # Enable and start Tailscale (with error handling)
-    if sudo systemctl enable tailscaled 2>/dev/null; then
-        print_success "Tailscale service enabled"
-    else
-        print_warning "Tailscale service enable failed, trying alternative method..."
-        # Try to create service file manually if it doesn't exist
-        if [ ! -f "/etc/systemd/system/tailscaled.service" ]; then
-            print_status "Creating Tailscale service file..."
-            sudo systemctl daemon-reload
-        fi
-    fi
+    # Enable and start Tailscale
+    sudo systemctl enable tailscaled
+    sudo systemctl start tailscaled
     
-    if sudo systemctl start tailscaled 2>/dev/null; then
-        print_success "Tailscale service started"
-    else
-        print_warning "Tailscale service start failed, may need manual configuration"
-    fi
+    # Wait for service to start
+    sleep 3
     
     # Verify Tailscale installation
     if sudo systemctl is-active --quiet tailscaled; then
         print_success "Tailscale installed and running"
+        print_status "Run 'sudo tailscale up' to connect to your Tailscale network"
     else
-        print_error "Tailscale installation or startup failed"
-        exit 1
+        print_warning "Tailscale service not running, but installation completed"
+        print_status "You may need to run 'sudo tailscale up' manually"
     fi
 }
 
@@ -840,39 +862,6 @@ install_tailscale() {
 # DOCKER INSTALLATION FUNCTIONS
 # =============================================================================
 
-# Function to install Docker
-install_docker() {
-    print_status "Installing Docker..."
-    
-    # Remove old Docker installations
-    sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-    
-    # Add Docker's official GPG key
-    sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    
-    # Add Docker repository
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    # Update package index
-    sudo apt update
-    
-    # Install Docker Engine
-    DEBIAN_FRONTEND=noninteractive sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    
-    # Add current user to docker group
-    sudo usermod -aG docker $USER
-    
-    # Enable and start Docker service
-    sudo systemctl enable docker
-    sudo systemctl start docker
-    
-    # Wait for Docker to fully start
-    sleep 5
-    print_success "Docker installed successfully"
-}
 
 # Function to create directories
 create_docker_directories() {
@@ -1618,7 +1607,6 @@ main() {
     
     # Part 3: Docker Services Setup
     print_section "PART 3: DOCKER SERVICES SETUP"
-    install_docker
     create_docker_directories
     create_portainer_compose
     create_restreamer_compose
