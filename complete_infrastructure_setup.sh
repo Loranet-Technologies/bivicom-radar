@@ -271,7 +271,13 @@ backup_uci_config() {
     print_status "Backing up current UCI configuration..."
     
     local backup_dir="/home/$USER/uci-backup-$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$backup_dir"
+    
+    # Try to create backup directory in user home, fallback to /tmp if needed
+    if ! mkdir -p "$backup_dir" 2>/dev/null; then
+        print_warning "Cannot create backup in home directory, using /tmp instead"
+        backup_dir="/tmp/uci-backup-$(date +%Y%m%d_%H%M%S)"
+        sudo mkdir -p "$backup_dir"
+    fi
     
     # Backup all UCI configs
     for config in /etc/config/*; do
@@ -1586,7 +1592,7 @@ create_installation_status_file() {
 ## 📁 Backup Locations
 
 ### UCI Backups
-- **Location:** /home/$USER/uci-backup-*
+- **Location:** /home/$USER/uci-backup-* (or /tmp/uci-backup-* as fallback)
 - **Contents:** Complete UCI configuration backup
 
 ### Node-RED Backups
