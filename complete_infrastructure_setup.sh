@@ -258,20 +258,48 @@ configure_uci_password() {
 restart_uci_services() {
     print_status "Restarting UCI services..."
     
-    # Reload network with proper error handling
-    if sudo /etc/init.d/network reload 2>/dev/null; then
+    # Try multiple methods to reload network service with complete error suppression
+    local network_reloaded=false
+    
+    # Method 1: Direct init.d script
+    if sudo /etc/init.d/network reload >/dev/null 2>&1; then
         print_success "Network service reloaded successfully"
+        network_reloaded=true
     else
-        print_warning "Network service reload failed, trying alternative method..."
-        # Try alternative network restart method
-        if sudo service network reload 2>/dev/null || sudo systemctl reload network 2>/dev/null; then
-            print_success "Network service reloaded via alternative method"
+        # Method 2: Service command
+        if sudo service network reload >/dev/null 2>&1; then
+            print_success "Network service reloaded via service command"
+            network_reloaded=true
         else
-            print_warning "Network service reload failed, but UCI changes are committed"
+            # Method 3: Systemctl
+            if sudo systemctl reload network >/dev/null 2>&1; then
+                print_success "Network service reloaded via systemctl"
+                network_reloaded=true
+            else
+                # Method 4: Try restart instead of reload
+                if sudo /etc/init.d/network restart >/dev/null 2>&1; then
+                    print_success "Network service restarted (reload failed)"
+                    network_reloaded=true
+                else
+                    # Method 5: Try wifi reload as last resort
+                    if sudo wifi reload >/dev/null 2>&1; then
+                        print_success "Wireless service reloaded (network reload failed)"
+                        network_reloaded=true
+                    else
+                        print_warning "Network service reload failed, but UCI changes are committed"
+                        print_status "Network configuration will take effect on next reboot"
+                    fi
+                fi
+            fi
         fi
     fi
     
-    print_success "UCI services restart completed"
+    if [ "$network_reloaded" = true ]; then
+        print_success "UCI services restart completed"
+    else
+        print_warning "UCI services restart completed with warnings"
+        print_status "Some network changes may require a reboot to take effect"
+    fi
 }
 
 
@@ -318,7 +346,6 @@ detect_architecture() {
 update_system() {
     print_status "Updating system packages..."
     sudo apt update -y
-    sudo apt upgrade -y
     print_success "System packages updated"
 }
 
