@@ -307,21 +307,6 @@ restart_uci_services() {
 }
 
 
-# Function to validate IP address
-validate_ip() {
-    local ip="$1"
-    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        IFS='.' read -ra ADDR <<< "$ip"
-        for i in "${ADDR[@]}"; do
-            if [ "$i" -gt 255 ] || [ "$i" -lt 0 ]; then
-                return 1
-            fi
-        done
-        return 0
-    else
-        return 1
-    fi
-}
 
 
 # Function to detect system architecture
@@ -896,7 +881,7 @@ import_flows() {
     # First, backup any existing flows
     backup_nodered_flows
     
-    # Stop Node-RED temporarily
+    # Stop Node-RED temporarily (if running)
     sudo systemctl stop nodered 2>/dev/null || true
     
     # Get the script directory
@@ -969,16 +954,20 @@ EOF
         print_warning "Flows validation failed, but Node-RED will start with default flow"
     fi
     
-    # Restart Node-RED
+    # Enable and start Node-RED
+    print_status "Enabling and starting Node-RED service..."
+    sudo systemctl enable nodered
     sudo systemctl start nodered
     
-    # Wait for restart
+    # Wait for service to start
     sleep 5
     
     if sudo systemctl is-active --quiet nodered; then
-        print_success "Flows imported and Node-RED restarted successfully"
+        print_success "Flows imported and Node-RED started successfully"
     else
-        print_error "Failed to restart Node-RED after importing flows"
+        print_error "Failed to start Node-RED after importing flows"
+        print_status "Checking service status..."
+        sudo systemctl status nodered --no-pager
         exit 1
     fi
 }
@@ -1212,22 +1201,6 @@ EOF
 # UCI CONFIGURATION FUNCTIONS
 # =============================================================================
 
-# Function to backup UCI configuration
-backup_uci_config() {
-    print_status "Creating backup of current UCI configuration..."
-    
-    BACKUP_DIR="/tmp/uci_backup_$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$BACKUP_DIR"
-    
-    # Backup all UCI config files
-    cp -r /etc/config/* "$BACKUP_DIR/" 2>/dev/null || true
-    
-    # Backup current UCI state
-    sudo uci show > "$BACKUP_DIR/uci_show_backup.txt" 2>/dev/null || true
-    
-    print_success "UCI configuration backed up to: $BACKUP_DIR"
-    echo "Backup location: $BACKUP_DIR"
-}
 
 # Function to configure UCI network interfaces
 configure_uci_network() {
@@ -1843,7 +1816,6 @@ main() {
     install_nodered
     install_nodered_nodes
     create_nodered_systemd_service
-    start_nodered
     import_flows
     install_tailscale
     configure_serial_ports
