@@ -8,20 +8,27 @@ A comprehensive infrastructure setup script that combines Node-RED, Tailscale, D
 
 ## 🚀 Quick Start
 
-### Interactive Installation
+### One-Line Installation (Recommended)
 
+```bash
+curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash -s -- --auto
+```
+
+This command will:
+- Download and run the installation script automatically
+- Use default configuration values (no user prompts)
+- Install all services: Node-RED, Tailscale, Docker, Portainer, and Restreamer
+- Configure UCI settings for OpenWrt systems
+- Set up complete infrastructure in one command
+
+### Alternative Installation Methods
+
+#### Interactive Installation (with prompts)
 ```bash
 curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash
 ```
 
-### Auto-Run Installation (No Prompts)
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash --auto
-```
-
-### Manual Installation
-
+#### Manual Installation
 ```bash
 # Download the setup script
 curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/complete_infrastructure_setup.sh -o setup.sh
