@@ -202,102 +202,57 @@ backup_uci_config() {
 configure_uci_system() {
     print_status "Configuring UCI system settings..."
     
-    uci set system.system.hostname="$TARGET_HOSTNAME"
-    uci set system.system.timezone="$TARGET_TIMEZONE"
-    uci set system.system.zonename="$TARGET_ZONENAME"
-    uci set system.system.model="$TARGET_MODEL"
-    uci set system.system.enable_212='1'
-    uci set system.system.dual_sim='0'
-    uci set system.system.sms_password='admin'
+    sudo uci set system.system.hostname="$TARGET_HOSTNAME"
+    sudo uci set system.system.timezone="$TARGET_TIMEZONE"
+    sudo uci set system.system.zonename="$TARGET_ZONENAME"
+    sudo uci set system.system.model="$TARGET_MODEL"
+    sudo uci set system.system.enable_212='1'
+    sudo uci set system.system.dual_sim='0'
+    sudo uci set system.system.sms_password='admin'
     
     # Configure NTP servers
-    uci delete system.ntp.server 2>/dev/null || true
-    uci add_list system.ntp.server='0.openwrt.pool.ntp.org'
-    uci add_list system.ntp.server='1.openwrt.pool.ntp.org'
-    uci add_list system.ntp.server='2.openwrt.pool.ntp.org'
-    uci add_list system.ntp.server='3.openwrt.pool.ntp.org'
+    sudo uci delete system.ntp.server 2>/dev/null || true
+    sudo uci add_list system.ntp.server='0.openwrt.pool.ntp.org'
+    sudo uci add_list system.ntp.server='1.openwrt.pool.ntp.org'
+    sudo uci add_list system.ntp.server='2.openwrt.pool.ntp.org'
+    sudo uci add_list system.ntp.server='3.openwrt.pool.ntp.org'
     
     # Configure access settings
-    uci set system.access.enable_telnet='1'
-    uci set system.access.enable_ssh='0'
+    sudo uci set system.access.enable_telnet='1'
+    sudo uci set system.access.enable_ssh='0'
     
-    uci commit system
+    sudo uci commit system
     print_success "UCI system configuration completed"
 }
 
 # Function to configure UCI password
 configure_uci_password() {
-    print_status "Configuring UCI user password..."
+    print_status "Configuring UCI admin password..."
     
-    uci set system.system.password='1qaz2wsx'
-    echo "root:1qaz2wsx" | chpasswd 2>/dev/null || {
-        print_warning "Could not set password using chpasswd, trying alternative method..."
+    # Set admin password using UCI
+    sudo uci set system.system.password='1qaz2wsx'
+    
+    # Alternative method using passwd command for admin user
+    echo "admin:1qaz2wsx" | sudo chpasswd 2>/dev/null || {
+        print_warning "Could not set admin password using chpasswd, trying alternative method..."
+        # Use UCI to set password hash
         PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
         if [ -n "$PASSWORD_HASH" ]; then
-            uci set system.system.password="$PASSWORD_HASH"
-            print_success "Password hash set via UCI"
+            sudo uci set system.system.password="$PASSWORD_HASH"
+            print_success "Admin password hash set via UCI"
         else
-            print_warning "Could not generate password hash, password may need to be set manually"
+            print_warning "Could not generate password hash, admin password may need to be set manually"
         fi
     }
-    uci commit system
     
-    if [ -w "/etc/shadow" ]; then
-        PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
-        if [ -n "$PASSWORD_HASH" ]; then
-            sed -i "s|^root:.*|root:$PASSWORD_HASH:0:0:99999:7:::|" /etc/shadow 2>/dev/null || true
-            print_success "Password set in /etc/shadow"
-        fi
-    fi
+    # Commit UCI changes
+    sudo uci commit system
     
-    print_success "UCI user password configuration completed"
-    print_status "Username: admin/root"
+    print_success "UCI admin password configuration completed"
+    print_status "Username: admin"
     print_status "Password: 1qaz2wsx"
 }
 
-# Function to configure UCI network settings
-configure_uci_network() {
-    print_status "Configuring UCI network settings..."
-    
-    # Configure LAN interface
-    uci set network.lan.proto='static'
-    uci set network.lan.ipaddr="$TARGET_LAN_IP"
-    uci set network.lan.netmask="$TARGET_LAN_NETMASK"
-    uci set network.lan.macaddr="$TARGET_LAN_MAC"
-    uci set network.lan.ifname='eth0 eth1'
-    uci set network.lan.type='bridge'
-    uci set network.lan.dns='8.8.8.8'
-    
-    # Configure WAN interface
-    uci set network.wan.proto='3g'
-    uci set network.wan.device='/dev/ttyUSB0'
-    uci set network.wan.service='umts'
-    uci set network.wan.apn="$TARGET_APN"
-    uci set network.wan.pincode=''
-    uci set network.wan.username=''
-    uci set network.wan.password=''
-    uci set network.wan.ifname='usb0'
-    
-    uci commit network
-    print_success "UCI network configuration completed"
-}
-
-# Function to configure UCI wireless settings
-configure_uci_wireless() {
-    print_status "Configuring UCI wireless settings..."
-    
-    # Configure wireless interface
-    uci set wireless.wlan0.enabled='1'
-    uci set wireless.wlan0.channel="$TARGET_WIFI_CHANNEL"
-    uci set wireless.wlan0.hwmode='g'
-    uci set wireless.wlan0.type='bcmdhd'
-    uci set wireless.wlan0.encryption='wpa2psk'
-    uci set wireless.wlan0.ssid="$TARGET_WIFI_SSID"
-    uci set wireless.wlan0.key="$TARGET_WIFI_PASSWORD"
-    
-    uci commit wireless
-    print_success "UCI wireless configuration completed"
-}
 
 # Function to restart UCI services
 restart_uci_services() {
@@ -1012,73 +967,10 @@ backup_uci_config() {
     cp -r /etc/config/* "$BACKUP_DIR/" 2>/dev/null || true
     
     # Backup current UCI state
-    uci show > "$BACKUP_DIR/uci_show_backup.txt" 2>/dev/null || true
+    sudo uci show > "$BACKUP_DIR/uci_show_backup.txt" 2>/dev/null || true
     
     print_success "UCI configuration backed up to: $BACKUP_DIR"
     echo "Backup location: $BACKUP_DIR"
-}
-
-# Function to configure UCI system settings
-configure_uci_system() {
-    print_status "Configuring UCI system settings..."
-    
-    # System configuration
-    uci set system.system.hostname="$TARGET_HOSTNAME"
-    uci set system.system.timezone="GMT-8"
-    uci set system.system.zonename="(GMT+08:00) Beijing, Chongqing, Hong Kong, Urumqi"
-    uci set system.system.dual_sim='0'
-    uci set system.system.sms_password='admin'
-    uci set system.system.model='TG451-STD'
-    uci set system.system.enable_212='1'
-    
-    # NTP configuration
-    uci set system.ntp.server='0.openwrt.pool.ntp.org' '1.openwrt.pool.ntp.org' '2.openwrt.pool.ntp.org' '3.openwrt.pool.ntp.org'
-    uci set system.ntp.enabled='1'
-    uci set system.ntp.enable_server='0'
-    
-    # Access configuration
-    uci set system.access.enable_telnet='1'
-    uci set system.access.enable_ssh='0'
-    
-    uci commit system
-    print_success "UCI system configuration completed"
-}
-
-# Function to configure UCI user password
-configure_uci_password() {
-    print_status "Configuring UCI user password..."
-    
-    # Set root password using UCI
-    uci set system.system.password='1qaz2wsx'
-    
-    # Alternative method using passwd command
-    echo "root:1qaz2wsx" | chpasswd 2>/dev/null || {
-        print_warning "Could not set password using chpasswd, trying alternative method..."
-        # Use UCI to set password hash
-        PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
-        if [ -n "$PASSWORD_HASH" ]; then
-            uci set system.system.password="$PASSWORD_HASH"
-            print_success "Password hash set via UCI"
-        else
-            print_warning "Could not generate password hash, password may need to be set manually"
-        fi
-    }
-    
-    # Commit UCI changes
-    uci commit system
-    
-    # Also set password in /etc/shadow if possible
-    if [ -w "/etc/shadow" ]; then
-        PASSWORD_HASH=$(echo -n "1qaz2wsx" | openssl passwd -1 -stdin 2>/dev/null || echo "")
-        if [ -n "$PASSWORD_HASH" ]; then
-            sed -i "s|^root:.*|root:$PASSWORD_HASH:0:0:99999:7:::|" /etc/shadow 2>/dev/null || true
-            print_success "Password set in /etc/shadow"
-        fi
-    fi
-    
-    print_success "UCI user password configuration completed"
-    print_status "Username: admin/root"
-    print_status "Password: 1qaz2wsx"
 }
 
 # Function to configure UCI network interfaces
@@ -1087,7 +979,7 @@ configure_uci_network() {
     
     # Note: Network configuration removed as requested
     # Only commit any existing network changes
-    uci commit network
+    sudo uci commit network
     print_success "UCI network configuration completed (network settings removed)"
 }
 
@@ -1096,16 +988,16 @@ configure_uci_wireless() {
     print_status "Configuring UCI wireless settings..."
     
     # WiFi interface
-    uci set wireless.wlan0=wifi-iface
-    uci set wireless.wlan0.enabled='1'
-    uci set wireless.wlan0.channel="$TARGET_WIFI_CHANNEL"
-    uci set wireless.wlan0.hwmode='g'
-    uci set wireless.wlan0.type='bcmdhd'
-    uci set wireless.wlan0.encryption='wpa2psk'
-    uci set wireless.wlan0.ssid="$TARGET_WIFI_SSID"
-    uci set wireless.wlan0.key="$TARGET_WIFI_PASSWORD"
+    sudo uci set wireless.wlan0=wifi-iface
+    sudo uci set wireless.wlan0.enabled='1'
+    sudo uci set wireless.wlan0.channel="$TARGET_WIFI_CHANNEL"
+    sudo uci set wireless.wlan0.hwmode='g'
+    sudo uci set wireless.wlan0.type='bcmdhd'
+    sudo uci set wireless.wlan0.encryption='wpa2psk'
+    sudo uci set wireless.wlan0.ssid="$TARGET_WIFI_SSID"
+    sudo uci set wireless.wlan0.key="$TARGET_WIFI_PASSWORD"
     
-    uci commit wireless
+    sudo uci commit wireless
     print_success "UCI wireless configuration completed"
 }
 

@@ -124,7 +124,7 @@ sudo chmod +x setup.sh
 
 ### UCI Configuration (OpenWrt)
 - **System**: NTP, timezone, hostname
-- **User**: Admin/root password: 1qaz2wsx
+- **User**: Admin password: 1qaz2wsx
 - **Wireless**: WPA2-PSK encryption
 - **Network**: Interface commit only (no network settings applied)
 - **Service**: Network services restart
