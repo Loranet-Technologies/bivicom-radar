@@ -156,37 +156,19 @@ get_uci_configuration() {
     # Get hostname
     get_user_input "Enter hostname" "router" "TARGET_HOSTNAME"
     
-    # Get LAN IP
-    while true; do
-        get_user_input "Enter LAN IP address" "192.168.14.1" "TARGET_LAN_IP"
-        if validate_ip "$TARGET_LAN_IP"; then
-            break
-        else
-            print_error "Invalid IP address format. Please try again."
-        fi
-    done
-    
-    # Get WiFi password
-    get_user_input "Enter WiFi password" "1qaz2wsx" "TARGET_WIFI_PASSWORD"
-    
-    # Get WiFi channel
-    get_user_input "Enter WiFi channel" "10" "TARGET_WIFI_CHANNEL"
-    
-    # Get APN
-    get_user_input "Enter APN for LTE" "Max4g" "TARGET_APN"
-    
-    # Set WiFi SSID to hostname
+    # Set default values for other settings (not prompted)
+    TARGET_LAN_IP="192.168.14.1"
     TARGET_WIFI_SSID="$TARGET_HOSTNAME"
+    TARGET_WIFI_PASSWORD="1qaz2wsx"
+    TARGET_WIFI_CHANNEL="10"
+    TARGET_APN="Max4g"
     
     # Display summary
     echo
     print_section "CONFIGURATION SUMMARY"
     print_status "Hostname: $TARGET_HOSTNAME"
-    print_status "LAN IP: $TARGET_LAN_IP"
     print_status "WiFi SSID: $TARGET_WIFI_SSID"
-    print_status "WiFi Password: $TARGET_WIFI_PASSWORD"
-    print_status "WiFi Channel: $TARGET_WIFI_CHANNEL"
-    print_status "APN: $TARGET_APN"
+    print_status "Note: Network settings will not be applied via UCI"
     echo
     
     # Confirmation
@@ -1103,35 +1085,10 @@ configure_uci_password() {
 configure_uci_network() {
     print_status "Configuring UCI network interfaces..."
     
-    # Loopback interface
-    uci set network.loopback=interface
-    uci set network.loopback.ifname='lo'
-    uci set network.loopback.proto='static'
-    uci set network.loopback.ipaddr='127.0.0.1'
-    uci set network.loopback.netmask='255.0.0.0'
-    
-    # LAN interface (bridge)
-    uci set network.lan=interface
-    uci set network.lan.type='bridge'
-    uci set network.lan.proto='static'
-    uci set network.lan.netmask="$TARGET_LAN_NETMASK"
-    uci set network.lan.macaddr="$TARGET_LAN_MAC"
-    uci set network.lan.ifname='eth0 eth1'
-    uci set network.lan.ipaddr="$TARGET_LAN_IP"
-    uci set network.lan.dns='8.8.8.8'
-    
-    # WAN interface (LTE)
-    uci set network.wan=interface
-    uci set network.wan.ifname='usb0'
-    uci set network.wan.disabled='0'
-    uci set network.wan.proto='lte'
-    uci set network.wan.service='AUTO'
-    uci set network.wan.auth_type='none'
-    uci set network.wan.wan_multi='1'
-    uci set network.wan.apn="$TARGET_APN"
-    
+    # Note: Network configuration removed as requested
+    # Only commit any existing network changes
     uci commit network
-    print_success "UCI network configuration completed"
+    print_success "UCI network configuration completed (network settings removed)"
 }
 
 # Function to configure UCI wireless
@@ -1463,7 +1420,7 @@ main() {
             TARGET_WIFI_PASSWORD="1qaz2wsx"
             TARGET_WIFI_CHANNEL="10"
             TARGET_APN="Max4g"
-            print_success "UCI configuration will be applied with default values"
+            print_success "UCI configuration will be applied with default hostname: $TARGET_HOSTNAME"
         else
             if get_uci_configuration; then
                 print_success "UCI configuration will be applied"
@@ -1475,8 +1432,19 @@ main() {
         print_warning "Not an OpenWrt system. UCI configuration will be skipped."
     fi
     
-    # Part 1: Node-RED and Tailscale Setup
-    print_section "PART 1: NODE-RED AND TAILSCALE SETUP"
+    # Part 1: UCI Configuration (if OpenWrt) - Run first
+    if [ "$IS_OPENWRT" = true ]; then
+        print_section "PART 1: UCI CONFIGURATION"
+        backup_uci_config
+        configure_uci_system
+        configure_uci_password
+        configure_uci_network
+        configure_uci_wireless
+        restart_uci_services
+    fi
+    
+    # Part 2: Node-RED and Tailscale Setup
+    print_section "PART 2: NODE-RED AND TAILSCALE SETUP"
     copy_flows_to_script
     update_system
     install_dependencies
@@ -1490,25 +1458,14 @@ main() {
     install_tailscale
     configure_serial_ports
     
-    # Part 2: Docker Services Setup
-    print_section "PART 2: DOCKER SERVICES SETUP"
+    # Part 3: Docker Services Setup
+    print_section "PART 3: DOCKER SERVICES SETUP"
     install_docker
     create_docker_directories
     create_portainer_compose
     create_restreamer_compose
     start_docker_services
     create_management_scripts
-    
-    # Part 3: UCI Configuration (if OpenWrt)
-    if [ "$IS_OPENWRT" = true ]; then
-        print_section "PART 3: UCI CONFIGURATION"
-        backup_uci_config
-        configure_uci_system
-        configure_uci_password
-        configure_uci_network
-        configure_uci_wireless
-        restart_uci_services
-    fi
     
     # Final verification
     print_section "FINAL VERIFICATION"
@@ -1527,16 +1484,22 @@ main() {
     echo "  - /opt/portainer/backup-services.sh"
     echo
     print_status "Next steps:"
-    echo "  1. Access Node-RED at: http://$(hostname -I | awk '{print $1}'):1880"
-    echo "  2. Access Portainer at: http://$(hostname -I | awk '{print $1}'):9000"
-    echo "  3. Access Restreamer at: http://$(hostname -I | awk '{print $1}'):8080"
-    echo "  4. Configure Tailscale with: sudo tailscale up"
     if [ "$IS_OPENWRT" = true ]; then
-        echo "  5. UCI configuration applied with hostname: $TARGET_HOSTNAME"
-        echo "  6. WiFi SSID: $TARGET_WIFI_SSID"
-        echo "  7. LAN IP: $TARGET_LAN_IP"
+        echo "  1. UCI configuration applied with hostname: $TARGET_HOSTNAME"
+        echo "  2. WiFi SSID: $TARGET_WIFI_SSID"
+        echo "  3. LAN IP: $TARGET_LAN_IP"
+        echo "  4. Access Node-RED at: http://$(hostname -I | awk '{print $1}'):1880"
+        echo "  5. Access Portainer at: http://$(hostname -I | awk '{print $1}'):9000"
+        echo "  6. Access Restreamer at: http://$(hostname -I | awk '{print $1}'):8080"
+        echo "  7. Configure Tailscale with: sudo tailscale up"
+        echo "  8. Use management scripts for service control"
+    else
+        echo "  1. Access Node-RED at: http://$(hostname -I | awk '{print $1}'):1880"
+        echo "  2. Access Portainer at: http://$(hostname -I | awk '{print $1}'):9000"
+        echo "  3. Access Restreamer at: http://$(hostname -I | awk '{print $1}'):8080"
+        echo "  4. Configure Tailscale with: sudo tailscale up"
+        echo "  5. Use management scripts for service control"
     fi
-    echo "  8. Use management scripts for service control"
     
     # Prompt for reboot
     prompt_reboot

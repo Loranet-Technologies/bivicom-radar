@@ -38,11 +38,11 @@ sudo chmod +x setup.sh
 
 ### UCI Configuration (OpenWrt)
 - ✅ **Interactive Configuration**: User prompts for customization
-- ✅ **Network Setup**: LAN/WAN interface configuration
-- ✅ **Wireless Configuration**: WiFi access point setup
 - ✅ **System Configuration**: Hostname, timezone, NTP
 - ✅ **User Password**: Admin/root password configuration
-- ✅ **Firewall Rules**: Comprehensive security configuration
+- ✅ **Wireless Configuration**: WiFi access point setup
+- ⚠️ **Network Configuration**: Network interface commit only (no network settings applied)
+- ✅ **Service Management**: Network services restart
 
 ## 🆕 New Features (v2.0)
 
@@ -79,7 +79,15 @@ sudo chmod +x setup.sh
 
 ## 🛠️ Installation Process
 
-### Part 1: Node-RED and Tailscale Setup
+### Part 1: UCI Configuration (OpenWrt Only) - Runs First
+1. **Configuration Backup**: Current UCI backup
+2. **System Configuration**: Hostname, timezone, NTP
+3. **User Password**: Admin/root password setup
+4. **Network Configuration**: Network interface commit (no network settings applied)
+5. **Wireless Configuration**: WiFi access point
+6. **Service Restart**: Network services restart
+
+### Part 2: Node-RED and Tailscale Setup
 1. **Flow Backup**: Copy existing Node-RED flows to script directory
 2. **System Update**: Updates packages and dependencies
 3. **NVM Installation**: Node Version Manager setup
@@ -91,21 +99,13 @@ sudo chmod +x setup.sh
 9. **Tailscale Installation**: VPN service setup
 10. **Serial Ports**: Permission configuration
 
-### Part 2: Docker Services Setup
+### Part 3: Docker Services Setup
 1. **Docker Installation**: Docker CE with Compose
 2. **Directory Creation**: Required directories setup
 3. **Portainer Configuration**: Container management UI
 4. **Restreamer Configuration**: Video streaming service
 5. **Service Startup**: Docker containers launch
 6. **Management Scripts**: Service control tools
-
-### Part 3: UCI Configuration (OpenWrt Only)
-1. **Configuration Backup**: Current UCI backup
-2. **System Configuration**: Hostname, timezone, NTP
-3. **User Password**: Admin/root password setup
-4. **Network Configuration**: LAN/WAN interfaces
-5. **Wireless Configuration**: WiFi access point
-6. **Service Restart**: Network services restart
 
 ## 🔧 Configuration Details
 
@@ -123,11 +123,11 @@ sudo chmod +x setup.sh
 - **Data Persistence**: Configured volumes
 
 ### UCI Configuration (OpenWrt)
-- **Network**: Bridge LAN, LTE WAN
-- **Wireless**: WPA2-PSK encryption
-- **Firewall**: Comprehensive rules
 - **System**: NTP, timezone, hostname
 - **User**: Admin/root password: 1qaz2wsx
+- **Wireless**: WPA2-PSK encryption
+- **Network**: Interface commit only (no network settings applied)
+- **Service**: Network services restart
 
 ## 🌐 Service Access
 
@@ -305,7 +305,7 @@ For support and questions:
 
 **Repository**: https://github.com/Loranet-Technologies/bivicom-radar  
 **Author**: Aqmar  
-**Version**: 1.0.0  
-**Last Updated**: September 8, 2025  
+**Version**: 2.1  
+**Last Updated**: December 2024  
 
-*This script provides a complete solution for setting up a full-featured router/edge device with infrastructure services and UCI configuration.*
+*This script provides a complete solution for setting up a full-featured router/edge device with infrastructure services and UCI configuration. UCI configuration now runs first with network settings removed as requested.*
