@@ -373,9 +373,11 @@ install_dependencies() {
     # Force remove dnsmasq if it's causing issues
     sudo apt remove --purge -y dnsmasq 2>/dev/null || true
     sudo apt autoremove -y 2>/dev/null || true
+    echo "dnsmasq removal completed"
     
     # Remove old Docker installations
     sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    echo "Old Docker installations removed"
     
     # Install basic dependencies first
     DEBIAN_FRONTEND=noninteractive sudo apt install -y \
@@ -390,6 +392,7 @@ install_dependencies() {
         htop \
         build-essential \
         python3
+    echo "Basic dependencies installed successfully"
     
     # Add Docker's official GPG key
     sudo mkdir -p /etc/apt/keyrings
@@ -410,6 +413,7 @@ install_dependencies() {
         containerd.io \
         docker-buildx-plugin \
         docker-compose-plugin
+    echo "Docker packages installed successfully"
     
     # Add current user to docker group
     sudo usermod -aG docker $USER
