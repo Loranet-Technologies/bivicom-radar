@@ -259,7 +259,6 @@ restart_uci_services() {
     print_status "Restarting UCI services..."
     
     /etc/init.d/network reload
-    /etc/init.d/firewall reload
     /etc/init.d/dnsmasq reload
     
     print_success "UCI services restarted"
