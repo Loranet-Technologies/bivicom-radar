@@ -788,7 +788,7 @@ validate_nodered_flows() {
     fi
     
     # Check if file is too small (likely empty or corrupted)
-    local file_size=$(stat -c%s "$flows_file" 2>/dev/null || echo "0")
+    local file_size=$(stat -f%z "$flows_file" 2>/dev/null || stat -c%s "$flows_file" 2>/dev/null || echo "0")
     if [ "$file_size" -lt 1000 ]; then
         print_warning "Flows file is very small ($file_size bytes), may be empty or corrupted"
         return 1

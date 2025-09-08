@@ -8,7 +8,7 @@
 # Author: Aqmar
 # =============================================================================
 
-set -e
+# set -e  # Commented out to prevent early exit on validation errors
 
 # Color codes for output
 RED='\033[0;31m'
@@ -51,7 +51,7 @@ validate_nodered_flows() {
     fi
     
     # Check if file is too small (likely empty or corrupted)
-    local file_size=$(stat -c%s "$flows_file" 2>/dev/null || echo "0")
+    local file_size=$(stat -f%z "$flows_file" 2>/dev/null || stat -c%s "$flows_file" 2>/dev/null || echo "0")
     if [ "$file_size" -lt 1000 ]; then
         print_warning "Flows file is very small ($file_size bytes), may be empty or corrupted"
         return 1
@@ -105,12 +105,17 @@ test_flow_download() {
     for url in "${repo_urls[@]}"; do
         print_status "Testing download from: $url"
         if curl -sSL --connect-timeout 10 --max-time 30 "$url" -o "test_flows.json" 2>/dev/null; then
-            if [ -s "test_flows.json" ] && validate_nodered_flows "test_flows.json" 2>/dev/null; then
-                print_success "Flow download test successful from: $url"
-                flows_downloaded=true
-                break
+            if [ -s "test_flows.json" ]; then
+                if validate_nodered_flows "test_flows.json"; then
+                    print_success "Flow download test successful from: $url"
+                    flows_downloaded=true
+                    break
+                else
+                    print_warning "Downloaded file is invalid from: $url"
+                    rm -f "test_flows.json"
+                fi
             else
-                print_warning "Downloaded file is invalid from: $url"
+                print_warning "Downloaded file is empty from: $url"
                 rm -f "test_flows.json"
             fi
         else
