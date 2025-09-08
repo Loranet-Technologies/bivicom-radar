@@ -354,8 +354,10 @@ update_system() {
     sudo dpkg --configure -a 2>/dev/null || true
     sudo apt --fix-broken install -y 2>/dev/null || true
     
-    # Hold problematic packages
-    sudo apt-mark hold dnsmasq 2>/dev/null || true
+    # Configure dnsmasq non-interactively to prevent prompts
+    echo "dnsmasq dnsmasq/confdir string /etc/dnsmasq.d" | sudo debconf-set-selections
+    echo "dnsmasq dnsmasq/run_daemon boolean true" | sudo debconf-set-selections
+    echo "dnsmasq dnsmasq/run_daemon seen true" | sudo debconf-set-selections
     
     sudo apt update -y
     print_success "System packages updated"
@@ -365,19 +367,24 @@ update_system() {
 install_dependencies() {
     print_status "Installing required dependencies..."
     
-    # Fix dnsmasq package issues and hold to prevent configuration conflicts
-    sudo apt-mark hold dnsmasq 2>/dev/null || true
+    # Fix dnsmasq package issues using non-interactive mode
     sudo dpkg --configure -a 2>/dev/null || true
     sudo apt --fix-broken install -y 2>/dev/null || true
     
-    # Force remove dnsmasq if it's causing issues
-    sudo apt remove --purge -y dnsmasq 2>/dev/null || true
-    sudo apt autoremove -y 2>/dev/null || true
-    echo "dnsmasq removal completed"
+    # Configure dnsmasq non-interactively to prevent prompts
+    echo "dnsmasq dnsmasq/confdir string /etc/dnsmasq.d" | sudo debconf-set-selections
+    echo "dnsmasq dnsmasq/run_daemon boolean true" | sudo debconf-set-selections
+    echo "dnsmasq dnsmasq/run_daemon seen true" | sudo debconf-set-selections
+    echo "dnsmasq configuration set for non-interactive mode"
     
-    # Remove old Docker installations
-    sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-    echo "Old Docker installations removed"
+    # Check if Docker is already installed
+    if command -v docker >/dev/null 2>&1; then
+        echo "Docker is already installed, skipping Docker installation"
+        DOCKER_ALREADY_INSTALLED=true
+    else
+        echo "Docker not found, will install Docker"
+        DOCKER_ALREADY_INSTALLED=false
+    fi
     
     # Install basic dependencies first
     DEBIAN_FRONTEND=noninteractive sudo apt install -y \
@@ -394,28 +401,35 @@ install_dependencies() {
         python3
     echo "Basic dependencies installed successfully"
     
-    # Add Docker's official GPG key
-    sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    # Install Docker only if not already installed
+    if [ "$DOCKER_ALREADY_INSTALLED" = false ]; then
+        echo "Installing Docker..."
+        
+        # Add Docker's official GPG key
+        sudo mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        
+        # Add Docker repository
+        echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        # Update package index after adding Docker repository
+        sudo apt update
+        
+        # Install Docker packages
+        DEBIAN_FRONTEND=noninteractive sudo apt install -y \
+            docker-ce \
+            docker-ce-cli \
+            containerd.io \
+            docker-buildx-plugin \
+            docker-compose-plugin
+        echo "Docker packages installed successfully"
+    else
+        echo "Docker installation skipped - already present"
+    fi
     
-    # Add Docker repository
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    # Update package index after adding Docker repository
-    sudo apt update
-    
-    # Install Docker packages
-    DEBIAN_FRONTEND=noninteractive sudo apt install -y \
-        docker-ce \
-        docker-ce-cli \
-        containerd.io \
-        docker-buildx-plugin \
-        docker-compose-plugin
-    echo "Docker packages installed successfully"
-    
-    # Add current user to docker group
+    # Add current user to docker group (always do this)
     sudo usermod -aG docker $USER
     
     # Enable and start Docker service
@@ -425,7 +439,14 @@ install_dependencies() {
     # Wait for Docker to fully start
     sleep 5
     
-    print_success "All dependencies and Docker installed"
+    # Check Docker status
+    if sudo systemctl is-active --quiet docker; then
+        print_success "Docker service is running"
+    else
+        print_warning "Docker service may need manual start"
+    fi
+    
+    print_success "All dependencies and Docker setup completed"
 }
 
 # =============================================================================
@@ -516,13 +537,49 @@ install_nodered_nodes() {
     mkdir -p "$NODERED_HOME/.node-red"
     cd "$NODERED_HOME/.node-red"
     
-    # Install required nodes from package.json
-    npm install node-red-contrib-ffmpeg@~0.1.1
-    npm install node-red-contrib-queue-gate@~1.5.5
-    npm install node-red-node-sqlite@~1.1.0
-    npm install node-red-node-serialport@2.0.3
+    # Get the script directory to check for local package.json
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     
-    print_success "Node-RED nodes installed"
+    # Check if we have a local package.json with dependencies
+    if [ -f "$SCRIPT_DIR/nodered_flows/package.json" ]; then
+        print_status "Installing nodes from local package.json..."
+        cp "$SCRIPT_DIR/nodered_flows/package.json" "$NODERED_HOME/.node-red/package.json"
+        
+        # Install dependencies from package.json
+        if npm install --production 2>/dev/null; then
+            print_success "Node-RED nodes installed from package.json"
+        else
+            print_warning "Failed to install from package.json, installing individual packages..."
+            install_individual_nodes
+        fi
+    else
+        print_warning "No package.json found, installing individual packages..."
+        install_individual_nodes
+    fi
+    
+    print_success "Node-RED nodes installation completed"
+}
+
+# Function to install individual Node-RED nodes
+install_individual_nodes() {
+    print_status "Installing individual Node-RED nodes..."
+    
+    # Install required nodes individually with error handling
+    local nodes=(
+        "node-red-contrib-ffmpeg@~0.1.1"
+        "node-red-contrib-queue-gate@~1.5.5"
+        "node-red-node-sqlite@~1.1.0"
+        "node-red-node-serialport@2.0.3"
+    )
+    
+    for node in "${nodes[@]}"; do
+        print_status "Installing $node..."
+        if npm install "$node" 2>/dev/null; then
+            print_success "Successfully installed $node"
+        else
+            print_warning "Failed to install $node, continuing with other packages..."
+        fi
+    done
 }
 
 # Function to create Node-RED systemd service
@@ -610,31 +667,94 @@ copy_flows_to_script() {
         print_status "Found local flows in script directory"
         print_success "Using local flows from repository"
     else
-    # Download flows from repository
-    print_status "Downloading flows from repository..."
-    sleep 2  # Brief delay before download
-    if curl -sSL "https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/nodered_flows/flows.json" -o "$SCRIPT_DIR/nodered_flows/flows.json" 2>/dev/null; then
-        print_success "Flows downloaded from repository"
-    else
+        # Download flows from repository
+        print_status "Downloading flows from repository..."
+        sleep 2  # Brief delay before download
+        
+        # Try multiple repository URLs for better reliability
+        local flows_downloaded=false
+        local repo_urls=(
+            "https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/nodered_flows/flows.json"
+            "https://github.com/Loranet-Technologies/bivicom-radar/raw/main/nodered_flows/flows.json"
+        )
+        
+        for url in "${repo_urls[@]}"; do
+            print_status "Trying to download from: $url"
+            if curl -sSL --connect-timeout 10 --max-time 30 "$url" -o "$SCRIPT_DIR/nodered_flows/flows.json" 2>/dev/null; then
+                # Validate downloaded file
+                if [ -s "$SCRIPT_DIR/nodered_flows/flows.json" ] && validate_nodered_flows "$SCRIPT_DIR/nodered_flows/flows.json" 2>/dev/null; then
+                    print_success "Flows downloaded and validated from repository"
+                    flows_downloaded=true
+                    break
+                else
+                    print_warning "Downloaded flows file is invalid, trying next URL..."
+                    rm -f "$SCRIPT_DIR/nodered_flows/flows.json"
+                fi
+            else
+                print_warning "Failed to download from: $url"
+            fi
+        done
+        
+        if [ "$flows_downloaded" = false ]; then
             print_warning "Failed to download flows from repository, trying local server flows..."
             # Fallback: Copy flows from current server if they exist
-            if [ -f "/home/admin/.node-red/flows.json" ]; then
-                cp "/home/admin/.node-red/flows.json" "$SCRIPT_DIR/nodered_flows/flows.json"
-                print_success "Flows copied from local server"
-            else
-                print_warning "No existing flows found on this server"
+            local fallback_paths=(
+                "/home/admin/.node-red/flows.json"
+                "/home/$USER/.node-red/flows.json"
+                "/root/.node-red/flows.json"
+            )
+            
+            for fallback_path in "${fallback_paths[@]}"; do
+                if [ -f "$fallback_path" ] && validate_nodered_flows "$fallback_path" 2>/dev/null; then
+                    cp "$fallback_path" "$SCRIPT_DIR/nodered_flows/flows.json"
+                    print_success "Flows copied from local server: $fallback_path"
+                    flows_downloaded=true
+                    break
+                fi
+            done
+            
+            if [ "$flows_downloaded" = false ]; then
+                print_warning "No valid existing flows found on this server"
             fi
         fi
         
         # Download package.json from repository
         sleep 1  # Brief delay between downloads
-        if curl -sSL "https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/nodered_flows/package.json" -o "$SCRIPT_DIR/nodered_flows/package.json" 2>/dev/null; then
-            print_success "Package.json downloaded from repository"
-        else
+        local package_downloaded=false
+        
+        for url in "${repo_urls[@]}"; do
+            local package_url="${url/flows.json/package.json}"
+            print_status "Trying to download package.json from: $package_url"
+            if curl -sSL --connect-timeout 10 --max-time 30 "$package_url" -o "$SCRIPT_DIR/nodered_flows/package.json" 2>/dev/null; then
+                # Validate downloaded package.json
+                if [ -s "$SCRIPT_DIR/nodered_flows/package.json" ] && python3 -c "import json; json.load(open('$SCRIPT_DIR/nodered_flows/package.json'))" 2>/dev/null; then
+                    print_success "Package.json downloaded and validated from repository"
+                    package_downloaded=true
+                    break
+                else
+                    print_warning "Downloaded package.json is invalid, trying next URL..."
+                    rm -f "$SCRIPT_DIR/nodered_flows/package.json"
+                fi
+            else
+                print_warning "Failed to download package.json from: $package_url"
+            fi
+        done
+        
+        if [ "$package_downloaded" = false ]; then
+            print_warning "Failed to download package.json from repository, trying local server..."
             # Fallback: Copy package.json from current server if it exists
-            if [ -f "/home/admin/.node-red/package.json" ]; then
-                cp "/home/admin/.node-red/package.json" "$SCRIPT_DIR/nodered_flows/package.json"
-                print_success "Package.json copied from local server"
+            for fallback_path in "${fallback_paths[@]}"; do
+                local package_fallback="${fallback_path/flows.json/package.json}"
+                if [ -f "$package_fallback" ] && python3 -c "import json; json.load(open('$package_fallback'))" 2>/dev/null; then
+                    cp "$package_fallback" "$SCRIPT_DIR/nodered_flows/package.json"
+                    print_success "Package.json copied from local server: $package_fallback"
+                    package_downloaded=true
+                    break
+                fi
+            done
+            
+            if [ "$package_downloaded" = false ]; then
+                print_warning "No valid package.json found, will use default dependencies"
             fi
         fi
     fi
@@ -1178,6 +1298,91 @@ check_nodered_flows() {
     return 0
 }
 
+# Function to test flow download and installation
+test_flow_download() {
+    print_section "TESTING NODE-RED FLOW DOWNLOAD"
+    
+    # Get the script directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    TEST_DIR="/tmp/nodered_flow_test"
+    
+    print_status "Creating test directory: $TEST_DIR"
+    mkdir -p "$TEST_DIR"
+    cd "$TEST_DIR"
+    
+    # Test flow download
+    print_status "Testing flow download from repository..."
+    local flows_downloaded=false
+    local repo_urls=(
+        "https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/nodered_flows/flows.json"
+        "https://github.com/Loranet-Technologies/bivicom-radar/raw/main/nodered_flows/flows.json"
+    )
+    
+    for url in "${repo_urls[@]}"; do
+        print_status "Testing download from: $url"
+        if curl -sSL --connect-timeout 10 --max-time 30 "$url" -o "test_flows.json" 2>/dev/null; then
+            if [ -s "test_flows.json" ] && validate_nodered_flows "test_flows.json" 2>/dev/null; then
+                print_success "Flow download test successful from: $url"
+                flows_downloaded=true
+                break
+            else
+                print_warning "Downloaded file is invalid from: $url"
+                rm -f "test_flows.json"
+            fi
+        else
+            print_warning "Download failed from: $url"
+        fi
+    done
+    
+    # Test package.json download
+    print_status "Testing package.json download..."
+    local package_downloaded=false
+    
+    for url in "${repo_urls[@]}"; do
+        local package_url="${url/flows.json/package.json}"
+        print_status "Testing package.json download from: $package_url"
+        if curl -sSL --connect-timeout 10 --max-time 30 "$package_url" -o "test_package.json" 2>/dev/null; then
+            if [ -s "test_package.json" ] && python3 -c "import json; json.load(open('test_package.json'))" 2>/dev/null; then
+                print_success "Package.json download test successful from: $package_url"
+                package_downloaded=true
+                break
+            else
+                print_warning "Downloaded package.json is invalid from: $package_url"
+                rm -f "test_package.json"
+            fi
+        else
+            print_warning "Package.json download failed from: $package_url"
+        fi
+    done
+    
+    # Clean up test directory
+    cd /
+    rm -rf "$TEST_DIR"
+    
+    # Summary
+    echo
+    print_status "=== FLOW DOWNLOAD TEST SUMMARY ==="
+    if [ "$flows_downloaded" = true ]; then
+        print_success "✓ Flow download: SUCCESS"
+    else
+        print_error "✗ Flow download: FAILED"
+    fi
+    
+    if [ "$package_downloaded" = true ]; then
+        print_success "✓ Package.json download: SUCCESS"
+    else
+        print_error "✗ Package.json download: FAILED"
+    fi
+    
+    if [ "$flows_downloaded" = true ] && [ "$package_downloaded" = true ]; then
+        print_success "All download tests passed! Cloud installation should work."
+        return 0
+    else
+        print_warning "Some download tests failed. Check network connectivity and repository access."
+        return 1
+    fi
+}
+
 # Function to create installation status file
 create_installation_status_file() {
     print_status "Creating installation status file..."
@@ -1455,6 +1660,7 @@ show_help() {
     echo "  --skip-tailscale    Skip Tailscale setup"
     echo "  --fix-nodered       Fix Node-RED flow issues"
     echo "  --check-flows       Check and validate Node-RED flows"
+    echo "  --test-download     Test Node-RED flow download from cloud"
     echo
     echo "This script will install:"
     echo "  • Node-RED with custom flows and validation"
@@ -1509,6 +1715,11 @@ handle_arguments() {
                     print_error "Node-RED flows have issues"
                     exit 1
                 fi
+                exit 0
+                ;;
+            --test-download)
+                print_section "TESTING NODE-RED FLOW DOWNLOAD"
+                test_flow_download
                 exit 0
                 ;;
             --auto|-y|--yes)
