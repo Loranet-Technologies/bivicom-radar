@@ -377,16 +377,7 @@ install_dependencies() {
     # Remove old Docker installations
     sudo apt remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
     
-    # Add Docker's official GPG key
-    sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    
-    # Add Docker repository
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    # Install all packages with non-interactive frontend to prevent prompts
+    # Install basic dependencies first
     DEBIAN_FRONTEND=noninteractive sudo apt install -y \
         apt-transport-https \
         ca-certificates \
@@ -398,7 +389,22 @@ install_dependencies() {
         nano \
         htop \
         build-essential \
-        python3 \
+        python3
+    
+    # Add Docker's official GPG key
+    sudo mkdir -p /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    
+    # Add Docker repository
+    echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    
+    # Update package index after adding Docker repository
+    sudo apt update
+    
+    # Install Docker packages
+    DEBIAN_FRONTEND=noninteractive sudo apt install -y \
         docker-ce \
         docker-ce-cli \
         containerd.io \
