@@ -1894,15 +1894,27 @@ prompt_reboot() {
     echo
     print_warning "Installation completed successfully!"
     print_status "A system reboot is recommended to ensure all changes take effect."
+    
+    # Check if we're in auto mode
+    if [[ "$AUTO_RUN_MODE" == "true" ]]; then
+        print_status "Auto-run mode: Skipping reboot prompt."
+        print_warning "Please reboot manually when convenient: sudo reboot"
+        print_success "Installation completed successfully! Exiting with SUCCESS code."
+        exit 0
+    fi
+    
     echo
     read -p "Do you want to reboot now? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         print_status "Rebooting system..."
+        print_success "Installation completed successfully! Exiting with SUCCESS code."
         sudo reboot
     else
         print_status "Reboot skipped. Please reboot manually when convenient."
         print_warning "Run 'sudo reboot' when ready to complete the setup."
+        print_success "Installation completed successfully! Exiting with SUCCESS code."
+        exit 0
     fi
 }
 
@@ -2050,6 +2062,7 @@ main() {
             print_success "All services are already installed and running!"
             print_status "Installation complete. Use --help for management commands."
             print_status "Use --force to reinstall even if services exist."
+            print_success "Installation completed successfully! Exiting with SUCCESS code."
             exit 0
         fi
     else
