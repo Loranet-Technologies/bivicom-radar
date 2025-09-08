@@ -512,12 +512,19 @@ install_nodejs() {
 install_nodered() {
     print_status "Installing Node-RED..."
     
+    # Check if Node-RED is already installed
+    if command -v node-red >/dev/null 2>&1; then
+        print_warning "Node-RED is already installed, skipping installation"
+        return 0
+    fi
+    
     # Ensure NVM is loaded
     export NVM_DIR="$HOME/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
     nvm use $NODE_VERSION
     
     # Install Node-RED globally
+    print_status "Installing Node-RED globally..."
     npm install -g --unsafe-perm node-red
     
     # Verify installation
@@ -545,7 +552,8 @@ install_nodered_nodes() {
         print_status "Installing nodes from local package.json..."
         cp "$SCRIPT_DIR/nodered_flows/package.json" "$NODERED_HOME/.node-red/package.json"
         
-        # Install dependencies from package.json
+        # Install dependencies from package.json (only Node-RED nodes, not Node-RED itself)
+        print_status "Installing Node-RED nodes from package.json..."
         if npm install --production 2>/dev/null; then
             print_success "Node-RED nodes installed from package.json"
         else
@@ -573,6 +581,15 @@ install_individual_nodes() {
     )
     
     for node in "${nodes[@]}"; do
+        # Extract package name without version for checking
+        local package_name=$(echo "$node" | cut -d'@' -f1)
+        
+        # Check if package is already installed
+        if npm list "$package_name" >/dev/null 2>&1; then
+            print_warning "$package_name is already installed, skipping..."
+            continue
+        fi
+        
         print_status "Installing $node..."
         if npm install "$node" 2>/dev/null; then
             print_success "Successfully installed $node"
