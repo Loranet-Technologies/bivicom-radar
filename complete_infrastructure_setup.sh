@@ -1092,7 +1092,7 @@ create_installation_status_file() {
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     local server_ip=$(hostname -I | awk '{print $1}')
     local hostname=$(hostname)
-    local status_file="/opt/installation_status_$(date +%Y%m%d_%H%M%S).md"
+    local status_file="/home/$USER/installation_status_$(date +%Y%m%d_%H%M%S).md"
     
     # Create status file on server
     cat > "$status_file" << EOF
@@ -1240,8 +1240,8 @@ EOF
     fi
     
     # Also create a symlink for easy access
-    ln -sf "$status_file" "/opt/installation_status_latest.md" 2>/dev/null || true
-    print_status "Latest status available at: /opt/installation_status_latest.md"
+    ln -sf "$status_file" "/home/$USER/installation_status_latest.md" 2>/dev/null || true
+    print_status "Latest status available at: /home/$USER/installation_status_latest.md"
 }
 
 # Function to verify all installations
