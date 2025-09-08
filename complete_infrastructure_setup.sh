@@ -1037,6 +1037,11 @@ EOF
 import_flows() {
     print_status "Setting up Node-RED flows with enhanced validation..."
     
+    # Debug: Show variable values
+    print_status "NODERED_HOME: $NODERED_HOME"
+    print_status "NODERED_USER: $NODERED_USER"
+    print_status "USER: $USER"
+    
     # First, backup any existing flows
     backup_nodered_flows
     
@@ -1051,15 +1056,21 @@ import_flows() {
     # Check if we have local flows to use
     if [ -f "$SCRIPT_DIR/nodered_flows/flows.json" ]; then
         print_status "Found local flows, validating..."
+        print_status "Source file: $SCRIPT_DIR/nodered_flows/flows.json"
+        print_status "Target file: $NODERED_HOME/.node-red/flows.json"
         
         # Validate local flows
         if validate_nodered_flows "$SCRIPT_DIR/nodered_flows/flows.json"; then
+            # Create target directory if it doesn't exist
+            mkdir -p "$NODERED_HOME/.node-red"
             cp "$SCRIPT_DIR/nodered_flows/flows.json" "$NODERED_HOME/.node-red/flows.json"
             print_success "Local flows imported successfully"
             flows_imported=true
         else
             print_warning "Local flows validation failed, trying backup restoration..."
         fi
+    else
+        print_warning "No local flows found at: $SCRIPT_DIR/nodered_flows/flows.json"
     fi
     
     # If local flows failed or don't exist, try to restore from backup
