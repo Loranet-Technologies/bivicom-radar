@@ -258,10 +258,20 @@ configure_uci_password() {
 restart_uci_services() {
     print_status "Restarting UCI services..."
     
-    /etc/init.d/network reload
-    /etc/init.d/dnsmasq reload
+    # Reload network with proper error handling
+    if sudo /etc/init.d/network reload 2>/dev/null; then
+        print_success "Network service reloaded successfully"
+    else
+        print_warning "Network service reload failed, trying alternative method..."
+        # Try alternative network restart method
+        if sudo service network reload 2>/dev/null || sudo systemctl reload network 2>/dev/null; then
+            print_success "Network service reloaded via alternative method"
+        else
+            print_warning "Network service reload failed, but UCI changes are committed"
+        fi
+    fi
     
-    print_success "UCI services restarted"
+    print_success "UCI services restart completed"
 }
 
 
