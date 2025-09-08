@@ -367,15 +367,8 @@ update_system() {
 install_dependencies() {
     print_status "Installing required dependencies..."
     
-    # Fix dnsmasq package issues using non-interactive mode
-    sudo dpkg --configure -a 2>/dev/null || true
-    sudo apt --fix-broken install -y 2>/dev/null || true
-    
-    # Configure dnsmasq non-interactively to prevent prompts
-    echo "dnsmasq dnsmasq/confdir string /etc/dnsmasq.d" | sudo debconf-set-selections
-    echo "dnsmasq dnsmasq/run_daemon boolean true" | sudo debconf-set-selections
-    echo "dnsmasq dnsmasq/run_daemon seen true" | sudo debconf-set-selections
-    echo "dnsmasq configuration set for non-interactive mode"
+    # Note: System update and package fixing already done in update_system()
+    # dnsmasq configuration already set in update_system()
     
     # Check if Docker is already installed
     if command -v docker >/dev/null 2>&1; then
@@ -386,20 +379,28 @@ install_dependencies() {
         DOCKER_ALREADY_INSTALLED=false
     fi
     
-    # Install basic dependencies first
-    DEBIAN_FRONTEND=noninteractive sudo apt install -y \
-        apt-transport-https \
-        ca-certificates \
-        curl \
-        gnupg \
-        lsb-release \
-        software-properties-common \
-        wget \
-        nano \
-        htop \
-        build-essential \
+    # Prepare package lists
+    local basic_packages=(
+        apt-transport-https
+        ca-certificates
+        curl
+        gnupg
+        lsb-release
+        software-properties-common
+        wget
+        nano
+        htop
+        build-essential
         python3
-    echo "Basic dependencies installed successfully"
+    )
+    
+    local docker_packages=(
+        docker-ce
+        docker-ce-cli
+        containerd.io
+        docker-buildx-plugin
+        docker-compose-plugin
+    )
     
     # Install Docker only if not already installed
     if [ "$DOCKER_ALREADY_INSTALLED" = false ]; then
@@ -415,18 +416,22 @@ install_dependencies() {
             $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
         
         # Update package index after adding Docker repository
+        print_status "Updating package index for Docker repository..."
         sudo apt update
         
-        # Install Docker packages
+        # Combine all packages into single installation
+        print_status "Installing all dependencies and Docker packages in one go..."
         DEBIAN_FRONTEND=noninteractive sudo apt install -y \
-            docker-ce \
-            docker-ce-cli \
-            containerd.io \
-            docker-buildx-plugin \
-            docker-compose-plugin
-        echo "Docker packages installed successfully"
+            "${basic_packages[@]}" \
+            "${docker_packages[@]}"
+        echo "All packages installed successfully"
     else
         echo "Docker installation skipped - already present"
+        # Install only basic dependencies
+        print_status "Installing basic dependencies..."
+        DEBIAN_FRONTEND=noninteractive sudo apt install -y \
+            "${basic_packages[@]}"
+        echo "Basic dependencies installed successfully"
     fi
     
     # Add current user to docker group (always do this)
