@@ -149,25 +149,33 @@ check_existing_services() {
         print_warning "✗ Tailscale is not installed or not running"
     fi
     
-    # Check Docker containers
+    # Check Docker containers (with permission handling)
     local containers_running=0
     if command -v docker >/dev/null 2>&1; then
-        if docker ps --format "{{.Names}}" | grep -q portainer; then
-            services_installed+=("Portainer")
-            print_success "✓ Portainer container is already running"
-            containers_running=$((containers_running + 1))
+        # Check if user has Docker permissions
+        if docker ps >/dev/null 2>&1; then
+            if docker ps --format "{{.Names}}" | grep -q portainer; then
+                services_installed+=("Portainer")
+                print_success "✓ Portainer container is already running"
+                containers_running=$((containers_running + 1))
+            else
+                services_missing+=("Portainer")
+                print_warning "✗ Portainer container is not running"
+            fi
+            
+            if docker ps --format "{{.Names}}" | grep -q restreamer; then
+                services_installed+=("Restreamer")
+                print_success "✓ Restreamer container is already running"
+                containers_running=$((containers_running + 1))
+            else
+                services_missing+=("Restreamer")
+                print_warning "✗ Restreamer container is not running"
+            fi
         else
+            # Docker permission issue - assume containers need to be started
             services_missing+=("Portainer")
-            print_warning "✗ Portainer container is not running"
-        fi
-        
-        if docker ps --format "{{.Names}}" | grep -q restreamer; then
-            services_installed+=("Restreamer")
-            print_success "✓ Restreamer container is already running"
-            containers_running=$((containers_running + 1))
-        else
             services_missing+=("Restreamer")
-            print_warning "✗ Restreamer container is not running"
+            print_warning "✗ Docker permission issue - containers will be started during installation"
         fi
     fi
     
@@ -263,12 +271,12 @@ backup_uci_config() {
     print_status "Backing up current UCI configuration..."
     
     local backup_dir="/etc/uci-backup-$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$backup_dir"
+    sudo mkdir -p "$backup_dir"
     
     # Backup all UCI configs
     for config in /etc/config/*; do
         if [ -f "$config" ]; then
-            cp "$config" "$backup_dir/"
+            sudo cp "$config" "$backup_dir/"
         fi
     done
     
@@ -1194,18 +1202,22 @@ EOF
 start_docker_services() {
     print_status "Starting Docker services..."
     
-    # Check if containers are already running
+    # Check if containers are already running (with permission handling)
     local portainer_running=false
     local restreamer_running=false
     
-    if docker ps --format "{{.Names}}" | grep -q portainer; then
-        portainer_running=true
-        print_success "Portainer container is already running"
-    fi
-    
-    if docker ps --format "{{.Names}}" | grep -q restreamer; then
-        restreamer_running=true
-        print_success "Restreamer container is already running"
+    if docker ps >/dev/null 2>&1; then
+        if docker ps --format "{{.Names}}" | grep -q portainer; then
+            portainer_running=true
+            print_success "Portainer container is already running"
+        fi
+        
+        if docker ps --format "{{.Names}}" | grep -q restreamer; then
+            restreamer_running=true
+            print_success "Restreamer container is already running"
+        fi
+    else
+        print_warning "Docker permission issue - will attempt to start containers"
     fi
     
     # Only start containers that are not already running
@@ -1704,20 +1716,25 @@ verify_installation() {
         return 1
     fi
     
-    # Check Docker containers
+    # Check Docker containers (with permission handling)
     print_status "Checking Docker containers..."
-    if docker ps | grep -q portainer; then
-        print_success "Portainer container is running"
+    if docker ps >/dev/null 2>&1; then
+        if docker ps | grep -q portainer; then
+            print_success "Portainer container is running"
+        else
+            print_error "Portainer container is not running"
+            return 1
+        fi
+        
+        if docker ps | grep -q restreamer; then
+            print_success "Restreamer container is running"
+        else
+            print_error "Restreamer container is not running"
+            return 1
+        fi
     else
-        print_error "Portainer container is not running"
-        return 1
-    fi
-    
-    if docker ps | grep -q restreamer; then
-        print_success "Restreamer container is running"
-    else
-        print_error "Restreamer container is not running"
-        return 1
+        print_warning "Cannot check Docker containers due to permission issues"
+        print_status "Please ensure Docker is running and user has proper permissions"
     fi
     
     # Get server IP
