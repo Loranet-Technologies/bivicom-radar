@@ -152,9 +152,10 @@ check_existing_services() {
     # Check Docker containers (with permission handling)
     local containers_running=0
     if command -v docker >/dev/null 2>&1; then
-        # Check if user has Docker permissions
-        if docker ps >/dev/null 2>&1; then
-            if docker ps --format "{{.Names}}" | grep -q portainer; then
+        # Check if user has Docker permissions by testing a simple command
+        if docker version >/dev/null 2>&1; then
+            # User has Docker permissions, check containers
+            if docker ps --format "{{.Names}}" 2>/dev/null | grep -q portainer; then
                 services_installed+=("Portainer")
                 print_success "✓ Portainer container is already running"
                 containers_running=$((containers_running + 1))
@@ -163,7 +164,7 @@ check_existing_services() {
                 print_warning "✗ Portainer container is not running"
             fi
             
-            if docker ps --format "{{.Names}}" | grep -q restreamer; then
+            if docker ps --format "{{.Names}}" 2>/dev/null | grep -q restreamer; then
                 services_installed+=("Restreamer")
                 print_success "✓ Restreamer container is already running"
                 containers_running=$((containers_running + 1))
@@ -1212,13 +1213,13 @@ start_docker_services() {
     local portainer_running=false
     local restreamer_running=false
     
-    if docker ps >/dev/null 2>&1; then
-        if docker ps --format "{{.Names}}" | grep -q portainer; then
+    if docker version >/dev/null 2>&1; then
+        if docker ps --format "{{.Names}}" 2>/dev/null | grep -q portainer; then
             portainer_running=true
             print_success "Portainer container is already running"
         fi
         
-        if docker ps --format "{{.Names}}" | grep -q restreamer; then
+        if docker ps --format "{{.Names}}" 2>/dev/null | grep -q restreamer; then
             restreamer_running=true
             print_success "Restreamer container is already running"
         fi
@@ -1724,15 +1725,15 @@ verify_installation() {
     
     # Check Docker containers (with permission handling)
     print_status "Checking Docker containers..."
-    if docker ps >/dev/null 2>&1; then
-        if docker ps | grep -q portainer; then
+    if docker version >/dev/null 2>&1; then
+        if docker ps 2>/dev/null | grep -q portainer; then
             print_success "Portainer container is running"
         else
             print_error "Portainer container is not running"
             return 1
         fi
         
-        if docker ps | grep -q restreamer; then
+        if docker ps 2>/dev/null | grep -q restreamer; then
             print_success "Restreamer container is running"
         else
             print_error "Restreamer container is not running"
