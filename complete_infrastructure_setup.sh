@@ -352,7 +352,12 @@ update_system() {
 # Function to install dependencies
 install_dependencies() {
     print_status "Installing required dependencies..."
-    sudo apt install -y \
+    
+    # Hold dnsmasq to prevent configuration conflicts
+    sudo apt-mark hold dnsmasq 2>/dev/null || true
+    
+    # Install packages with non-interactive frontend to prevent prompts
+    DEBIAN_FRONTEND=noninteractive sudo apt install -y \
         apt-transport-https \
         ca-certificates \
         curl \
@@ -789,7 +794,7 @@ install_docker() {
     sudo apt update
     
     # Install Docker Engine
-    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    DEBIAN_FRONTEND=noninteractive sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     
     # Add current user to docker group
     sudo usermod -aG docker $USER
@@ -1037,18 +1042,6 @@ configure_uci_wireless() {
     print_success "UCI wireless configuration completed"
 }
 
-# Function to restart UCI services
-restart_uci_services() {
-    print_status "Restarting UCI services..."
-    
-    # Restart network
-    /etc/init.d/network restart
-    
-    # Restart wireless
-    /etc/init.d/network restart
-    
-    print_success "UCI services restarted"
-}
 
 # =============================================================================
 # CONFIGURATION FUNCTIONS
@@ -1217,7 +1210,7 @@ sudo uci show
 
 # Network
 sudo uci show network
-sudo /etc/init.d/network reload
+sudo /etc/init.d/network reload >/dev/null 2>&1
 
 # Wireless
 sudo uci show wireless
