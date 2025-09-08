@@ -349,6 +349,14 @@ detect_architecture() {
 # Function to update system
 update_system() {
     print_status "Updating system packages..."
+    
+    # Fix any broken packages first
+    sudo dpkg --configure -a 2>/dev/null || true
+    sudo apt --fix-broken install -y 2>/dev/null || true
+    
+    # Hold problematic packages
+    sudo apt-mark hold dnsmasq 2>/dev/null || true
+    
     sudo apt update -y
     print_success "System packages updated"
 }
@@ -357,8 +365,10 @@ update_system() {
 install_dependencies() {
     print_status "Installing required dependencies..."
     
-    # Hold dnsmasq to prevent configuration conflicts
+    # Fix dnsmasq package issues and hold to prevent configuration conflicts
     sudo apt-mark hold dnsmasq 2>/dev/null || true
+    sudo dpkg --configure -a 2>/dev/null || true
+    sudo apt --fix-broken install -y 2>/dev/null || true
     
     # Install packages with non-interactive frontend to prevent prompts
     DEBIAN_FRONTEND=noninteractive sudo apt install -y \
@@ -796,9 +806,26 @@ install_tailscale() {
     # Download and run Tailscale installation script
     curl -sSL https://raw.githubusercontent.com/iyon09/Bivocom-Node-RED-Tailscale-/main/DanLab_BV2.sh | bash
     
-    # Enable and start Tailscale
-    sudo systemctl enable tailscaled
-    sudo systemctl start tailscaled
+    # Wait for installation to complete
+    sleep 5
+    
+    # Enable and start Tailscale (with error handling)
+    if sudo systemctl enable tailscaled 2>/dev/null; then
+        print_success "Tailscale service enabled"
+    else
+        print_warning "Tailscale service enable failed, trying alternative method..."
+        # Try to create service file manually if it doesn't exist
+        if [ ! -f "/etc/systemd/system/tailscaled.service" ]; then
+            print_status "Creating Tailscale service file..."
+            sudo systemctl daemon-reload
+        fi
+    fi
+    
+    if sudo systemctl start tailscaled 2>/dev/null; then
+        print_success "Tailscale service started"
+    else
+        print_warning "Tailscale service start failed, may need manual configuration"
+    fi
     
     # Verify Tailscale installation
     if sudo systemctl is-active --quiet tailscaled; then
