@@ -27,9 +27,9 @@ NODERED_HOME="/home/$USER"
 TIMEZONE="Asia/Kuala_Lumpur"
 RESTREAMER_USERNAME="admin"
 RESTREAMER_PASSWORD="L@ranet2025"
-RESTREAMER_DATA_DIR="/mnt/restreamer/db"
-PORTAINER_DATA_DIR="/opt/portainer"
-RESTREAMER_CONFIG_DIR="/opt/restreamer"
+RESTREAMER_DATA_DIR="/data/restreamer/db"
+PORTAINER_DATA_DIR="/data/portainer"
+RESTREAMER_CONFIG_DIR="/data/restreamer"
 
 # UCI Configuration variables (will be set interactively)
 TARGET_HOSTNAME=""
@@ -1385,20 +1385,20 @@ create_management_scripts() {
 case "$1" in
     start)
         echo "Starting all services..."
-        cd /opt/portainer && docker compose up -d
-        cd /opt/restreamer && docker compose up -d
+        cd /data/portainer && docker compose up -d
+        cd /data/restreamer && docker compose up -d
         echo "All services started"
         ;;
     stop)
         echo "Stopping all services..."
-        cd /opt/portainer && docker compose down
-        cd /opt/restreamer && docker compose down
+        cd /data/portainer && docker compose down
+        cd /data/restreamer && docker compose down
         echo "All services stopped"
         ;;
     restart)
         echo "Restarting all services..."
-        cd /opt/portainer && docker compose restart
-        cd /opt/restreamer && docker compose restart
+        cd /data/portainer && docker compose restart
+        cd /data/restreamer && docker compose restart
         echo "All services restarted"
         ;;
     status)
@@ -1414,8 +1414,8 @@ case "$1" in
         ;;
     update)
         echo "Updating all services..."
-        cd /opt/portainer && docker compose pull && docker compose up -d
-        cd /opt/restreamer && docker compose pull && docker compose up -d
+        cd /data/portainer && docker compose pull && docker compose up -d
+        cd /data/restreamer && docker compose pull && docker compose up -d
         echo "All services updated"
         ;;
     *)
@@ -1449,7 +1449,7 @@ echo "Backing up Portainer data..."
 docker run --rm -v portainer_portainer_data:/data -v $BACKUP_DIR:/backup alpine tar czf /backup/portainer-$DATE.tar.gz -C /data .
 
 echo "Backing up Restreamer data..."
-tar czf $BACKUP_DIR/restreamer-$DATE.tar.gz /mnt/restreamer/db
+tar czf $BACKUP_DIR/restreamer-$DATE.tar.gz /data/restreamer/db
 
 echo "Backup completed: $BACKUP_DIR"
 ls -la $BACKUP_DIR/*$DATE*
@@ -1676,14 +1676,14 @@ create_installation_status_file() {
 - **Status:** $(docker ps --filter "name=portainer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
 - **HTTP URL:** http://$server_ip:9000
 - **HTTPS URL:** https://$server_ip:9443
-- **Data Directory:** /opt/portainer
+- **Data Directory:** /data/portainer
 
 #### Restreamer
 - **Status:** $(docker ps --filter "name=restreamer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
 - **URL:** http://$server_ip:8080
 - **Username:** $RESTREAMER_USERNAME
 - **Password:** $RESTREAMER_PASSWORD
-- **Data Directory:** /mnt/restreamer
+- **Data Directory:** /data/restreamer
 
 ### Tailscale VPN
 - **Status:** $(sudo tailscale status 2>/dev/null | head -1 || echo "Not connected")
