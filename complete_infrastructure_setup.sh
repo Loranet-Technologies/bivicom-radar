@@ -1372,8 +1372,12 @@ EOFNEWGRP
 create_management_scripts() {
     print_status "Creating management scripts..."
     
+    # Create user management scripts directory
+    local USER_SCRIPTS_DIR="/home/$USER/management-scripts"
+    mkdir -p "$USER_SCRIPTS_DIR"
+    
     # Create service management script
-    cat > $PORTAINER_DATA_DIR/manage-services.sh << 'EOF'
+    cat > "$USER_SCRIPTS_DIR/manage-services.sh" << 'EOF'
 #!/bin/bash
 
 # Docker Services Management Script
@@ -1427,15 +1431,15 @@ case "$1" in
 esac
 EOF
     
-    chmod +x $PORTAINER_DATA_DIR/manage-services.sh
+    chmod +x "$USER_SCRIPTS_DIR/manage-services.sh"
     
     # Create backup script
-    cat > $PORTAINER_DATA_DIR/backup-services.sh << 'EOF'
+    cat > "$USER_SCRIPTS_DIR/backup-services.sh" << 'EOF'
 #!/bin/bash
 
 # Docker Services Backup Script
 
-BACKUP_DIR="/opt/backups"
+BACKUP_DIR="/home/$USER/backups"
 DATE=$(date +%Y%m%d_%H%M%S)
 
 echo "Creating backup directory..."
@@ -1451,7 +1455,7 @@ echo "Backup completed: $BACKUP_DIR"
 ls -la $BACKUP_DIR/*$DATE*
 EOF
     
-    chmod +x $PORTAINER_DATA_DIR/backup-services.sh
+    chmod +x "$USER_SCRIPTS_DIR/backup-services.sh"
     
     print_success "Management scripts created"
 }
@@ -1713,8 +1717,8 @@ create_installation_status_file() {
 - **Standard Backup:** ~/.node-red/.flows.json.backup
 
 ### Docker Backups
-- **Script:** /opt/portainer/backup-services.sh
-- **Usage:** sudo /opt/portainer/backup-services.sh
+- **Script:** /home/$USER/management-scripts/backup-services.sh
+- **Usage:** /home/$USER/management-scripts/backup-services.sh
 
 ## 🛠️ Management Commands
 
@@ -1882,7 +1886,7 @@ verify_installation() {
     echo -e "${BLUE}Docker containers:${NC} docker ps"
     echo -e "${BLUE}Docker logs:${NC} docker logs [container_name]"
     echo -e "${BLUE}Tailscale status:${NC} sudo tailscale status"
-    echo -e "${BLUE}Management script:${NC} /opt/portainer/manage-services.sh"
+    echo -e "${BLUE}Management script:${NC} /home/$USER/management-scripts/manage-services.sh"
 }
 
 # Function to prompt for reboot
@@ -2125,8 +2129,8 @@ main() {
     print_warning "If you encounter permission issues in future sessions, run: newgrp docker"
     echo
     print_status "Management scripts created:"
-    echo "  - /opt/portainer/manage-services.sh"
-    echo "  - /opt/portainer/backup-services.sh"
+    echo "  - /home/$USER/management-scripts/manage-services.sh"
+    echo "  - /home/$USER/management-scripts/backup-services.sh"
     echo
     print_status "Next steps:"
     if [ "$IS_OPENWRT" = true ]; then
