@@ -1033,96 +1033,128 @@ EOF
     fi
 }
 
-# Function to import flows
+# Function to download and import Node-RED flows from repository (DEFAULT BEHAVIOR)
 import_flows() {
-    print_status "Setting up Node-RED flows with enhanced validation..."
+    print_status "Downloading and importing Node-RED flows from repository..."
     
-    # Debug: Show variable values
-    print_status "NODERED_HOME: $NODERED_HOME"
-    print_status "NODERED_USER: $NODERED_USER"
-    print_status "USER: $USER"
+    # Configuration
+    local REPO_URL="https://github.com/Loranet-Technologies/bivicom-radar"
+    local BASE_URL="https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/nodered_flows"
+    local DOWNLOAD_DIR="/home/$USER/nodered_flows"
+    local BACKUP_DIR="/home/$USER/nodered_flows_backup"
     
-    # First, backup any existing flows
-    backup_nodered_flows
+    print_status "Repository: $REPO_URL"
+    print_status "Download directory: $DOWNLOAD_DIR"
     
-    # Stop Node-RED temporarily (if running)
-    sudo systemctl stop nodered 2>/dev/null || true
-    
-    # Get the script directory
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
-    local flows_imported=false
-    
-    # Check if we have local flows to use
-    if [ -f "$SCRIPT_DIR/nodered_flows/flows.json" ]; then
-        print_status "Found local flows, validating..."
-        print_status "Source file: $SCRIPT_DIR/nodered_flows/flows.json"
-        print_status "Target file: $NODERED_HOME/.node-red/flows.json"
+    # Create backup of existing flows
+    print_status "Creating backup of existing flows..."
+    if [ -d "$NODERED_HOME/.node-red" ]; then
+        mkdir -p "$BACKUP_DIR"
+        local timestamp=$(date +%Y%m%d_%H%M%S)
         
-        # Validate local flows
-        if validate_nodered_flows "$SCRIPT_DIR/nodered_flows/flows.json"; then
-            # Create target directory if it doesn't exist
-            mkdir -p "$NODERED_HOME/.node-red"
-            cp "$SCRIPT_DIR/nodered_flows/flows.json" "$NODERED_HOME/.node-red/flows.json"
-            print_success "Local flows imported successfully"
-            flows_imported=true
-        else
-            print_warning "Local flows validation failed, trying backup restoration..."
+        # Backup flows.json if it exists
+        if [ -f "$NODERED_HOME/.node-red/flows.json" ]; then
+            cp "$NODERED_HOME/.node-red/flows.json" "$BACKUP_DIR/flows_$timestamp.json"
+            print_success "Backed up flows.json to $BACKUP_DIR/flows_$timestamp.json"
+        fi
+        
+        # Backup flows_cred.json if it exists
+        if [ -f "$NODERED_HOME/.node-red/flows_cred.json" ]; then
+            cp "$NODERED_HOME/.node-red/flows_cred.json" "$BACKUP_DIR/flows_cred_$timestamp.json"
+            print_success "Backed up flows_cred.json to $BACKUP_DIR/flows_cred_$timestamp.json"
+        fi
+        
+        # Backup package.json if it exists
+        if [ -f "$NODERED_HOME/.node-red/package.json" ]; then
+            cp "$NODERED_HOME/.node-red/package.json" "$BACKUP_DIR/package_$timestamp.json"
+            print_success "Backed up package.json to $BACKUP_DIR/package_$timestamp.json"
         fi
     else
-        print_warning "No local flows found at: $SCRIPT_DIR/nodered_flows/flows.json"
+        print_warning "Node-RED home directory not found: $NODERED_HOME/.node-red"
     fi
     
-    # If local flows failed or don't exist, try to restore from backup
-    if [ "$flows_imported" = false ]; then
-        print_warning "Local flows not available, checking for existing backups..."
-        if restore_nodered_flows; then
-            flows_imported=true
-        else
-            print_warning "No valid backup found, will create default flows"
-        fi
-    fi
+    # Create download directory and download files
+    print_status "Downloading flows from repository..."
+    mkdir -p "$DOWNLOAD_DIR"
+    cd "$DOWNLOAD_DIR"
     
-    # If still no flows, create default
-    if [ "$flows_imported" = false ]; then
-        print_warning "No valid flows found, creating default flows"
-        cat > "$NODERED_HOME/.node-red/flows.json" << 'EOF'
-[
-    {
-        "id": "tab1",
-        "type": "tab",
-        "label": "Default Flow",
-        "disabled": false,
-        "info": "Default Node-RED flow - please import your custom flows"
-    }
-]
-EOF
-    fi
-    
-    # Copy package.json if available
-    if [ -f "$SCRIPT_DIR/nodered_flows/package.json" ]; then
-        cp "$SCRIPT_DIR/nodered_flows/package.json" "$NODERED_HOME/.node-red/package.json"
-        print_success "Package.json copied from local backup"
-    fi
-    
-    # Set proper ownership
-    if [ -f "$NODERED_HOME/.node-red/flows.json" ]; then
-        sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
+    # Download main flows.json
+    print_status "Downloading flows.json..."
+    if curl -fsSL "$BASE_URL/flows.json" -o flows.json; then
+        print_success "✓ flows.json downloaded ($(du -h flows.json | cut -f1))"
     else
-        print_error "flows.json file not found after import process"
+        print_error "✗ Failed to download flows.json"
         return 1
     fi
     
-    if [ -f "$NODERED_HOME/.node-red/package.json" ]; then
-        sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/package.json"
+    # Download package.json
+    print_status "Downloading package.json..."
+    if curl -fsSL "$BASE_URL/package.json" -o package.json; then
+        print_success "✓ package.json downloaded ($(du -h package.json | cut -f1))"
+    else
+        print_error "✗ Failed to download package.json"
+        return 1
     fi
     
-    # Final validation
-    if validate_nodered_flows "$NODERED_HOME/.node-red/flows.json"; then
-        print_success "Node-RED flows setup completed successfully"
+    # Download backup flows
+    print_status "Downloading backup flows..."
+    mkdir -p nodered_flows_backup
+    
+    if curl -fsSL "$BASE_URL/nodered_flows_backup/flows.json" -o nodered_flows_backup/flows.json; then
+        print_success "✓ Backup flows.json downloaded"
     else
-        print_warning "Flows validation failed, but Node-RED will start with default flow"
+        print_warning "⚠ Failed to download backup flows.json"
     fi
+    
+    if curl -fsSL "$BASE_URL/nodered_flows_backup/package.json" -o nodered_flows_backup/package.json; then
+        print_success "✓ Backup package.json downloaded"
+    else
+        print_warning "⚠ Failed to download backup package.json"
+    fi
+    
+    # Validate downloaded files
+    print_status "Validating downloaded files..."
+    
+    # Validate flows.json
+    if [ -f "$DOWNLOAD_DIR/flows.json" ]; then
+        if python3 -m json.tool "$DOWNLOAD_DIR/flows.json" > /dev/null 2>&1; then
+            local flow_count=$(python3 -c "import json; data=json.load(open('$DOWNLOAD_DIR/flows.json')); print(len([item for item in data if item.get('type') == 'tab']))")
+            print_success "✓ flows.json is valid JSON with $flow_count tabs"
+        else
+            print_error "✗ flows.json is not valid JSON"
+            return 1
+        fi
+    else
+        print_error "✗ flows.json not found"
+        return 1
+    fi
+    
+    # Validate package.json
+    if [ -f "$DOWNLOAD_DIR/package.json" ]; then
+        if python3 -m json.tool "$DOWNLOAD_DIR/package.json" > /dev/null 2>&1; then
+            print_success "✓ package.json is valid JSON"
+        else
+            print_error "✗ package.json is not valid JSON"
+            return 1
+        fi
+    else
+        print_error "✗ package.json not found"
+        return 1
+    fi
+    
+    # Import flows to Node-RED
+    print_status "Copying flows.json to Node-RED directory..."
+    mkdir -p "$NODERED_HOME/.node-red"
+    if cp "$DOWNLOAD_DIR/flows.json" "$NODERED_HOME/.node-red/flows.json"; then
+        print_success "✓ flows.json copied to $NODERED_HOME/.node-red"
+    else
+        print_error "✗ Failed to copy flows.json"
+        return 1
+    fi
+    
+    # Set proper permissions
+    chown -R "$USER:$USER" "$NODERED_HOME/.node-red"
+    chmod 644 "$NODERED_HOME/.node-red/flows.json"
     
     # Enable and start Node-RED
     print_status "Enabling and starting Node-RED service..."
@@ -1133,13 +1165,26 @@ EOF
     sleep 5
     
     if sudo systemctl is-active --quiet nodered; then
-        print_success "Flows imported and Node-RED started successfully"
+        print_success "✓ Node-RED is running with new flows"
     else
-        print_error "Failed to start Node-RED after importing flows"
-        print_status "Checking service status..."
-        sudo systemctl status nodered --no-pager
-        exit 1
+        print_error "✗ Node-RED failed to start after restart"
+        return 1
     fi
+    
+    # Final verification
+    if [ -f "$NODERED_HOME/.node-red/flows.json" ]; then
+        local flow_size=$(du -h "$NODERED_HOME/.node-red/flows.json" | cut -f1)
+        local flow_count=$(python3 -c "import json; data=json.load(open('$NODERED_HOME/.node-red/flows.json')); print(len([item for item in data if item.get('type') == 'tab']))")
+        print_success "✓ Node-RED flows loaded: $flow_count tabs ($flow_size)"
+    else
+        print_error "✗ Node-RED flows not found"
+        return 1
+    fi
+    
+    print_success "Node-RED flows downloaded and imported successfully!"
+    print_status "Flows Location: $NODERED_HOME/.node-red/flows.json"
+    print_status "Download Location: $DOWNLOAD_DIR"
+    print_status "Backup Location: $BACKUP_DIR"
 }
 
 # Function to install Tailscale
@@ -1592,6 +1637,7 @@ test_flow_download() {
     fi
 }
 
+
 # Function to create installation status file
 create_installation_status_file() {
     print_status "Creating installation status file..."
@@ -1876,7 +1922,7 @@ show_help() {
     echo "  --test-download     Test Node-RED flow download from cloud"
     echo
     echo "This script will install:"
-    echo "  • Node-RED with custom flows and validation"
+    echo "  • Node-RED with flows downloaded from repository"
     echo "  • Tailscale VPN"
     echo "  • Docker & Docker Compose"
     echo "  • Portainer (Container Management)"
