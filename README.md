@@ -8,10 +8,16 @@ A comprehensive infrastructure setup script that combines Node-RED, Tailscale, D
 
 ## 🚀 Quick Start
 
-### One-Line Installation
+### Interactive Installation
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash
+```
+
+### Auto-Run Installation (No Prompts)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/install.sh | bash --auto
 ```
 
 ### Manual Installation
@@ -78,6 +84,10 @@ sudo chmod +x setup.sh
 ```
 
 ## 🛠️ Installation Process
+
+### Installation Modes
+- **Interactive Mode**: Prompts for UCI configuration (hostname, etc.)
+- **Auto-Run Mode**: Uses default values, minimal prompts
 
 ### Part 1: UCI Configuration (OpenWrt Only) - Runs First
 1. **Configuration Backup**: Current UCI backup

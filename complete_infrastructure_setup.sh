@@ -1085,6 +1085,165 @@ check_nodered_flows() {
     return 0
 }
 
+# Function to create installation status file
+create_installation_status_file() {
+    print_status "Creating installation status file..."
+    
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local server_ip=$(hostname -I | awk '{print $1}')
+    local hostname=$(hostname)
+    local status_file="/opt/installation_status_$(date +%Y%m%d_%H%M%S).md"
+    
+    # Create status file on server
+    cat > "$status_file" << EOF
+# Loranet Infrastructure Installation Status
+
+**Installation Date:** $timestamp  
+**Server Hostname:** $hostname  
+**Server IP:** $server_ip  
+**Installation Mode:** ${AUTO_RUN:-Interactive}
+
+## 🚀 Services Installed
+
+### Node-RED
+- **Status:** $(systemctl is-active nodered 2>/dev/null || echo "Unknown")
+- **URL:** http://$server_ip:1880
+- **Service:** sudo systemctl status nodered
+- **Logs:** sudo journalctl -u nodered -f
+
+### Docker Services
+- **Docker Status:** $(systemctl is-active docker 2>/dev/null || echo "Unknown")
+- **Containers:** $(docker ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null || echo "Docker not available")
+
+#### Portainer
+- **Status:** $(docker ps --filter "name=portainer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
+- **HTTP URL:** http://$server_ip:9000
+- **HTTPS URL:** https://$server_ip:9443
+- **Data Directory:** /opt/portainer
+
+#### Restreamer
+- **Status:** $(docker ps --filter "name=restreamer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
+- **URL:** http://$server_ip:8080
+- **Username:** $RESTREAMER_USERNAME
+- **Password:** $RESTREAMER_PASSWORD
+- **Data Directory:** /mnt/restreamer
+
+### Tailscale VPN
+- **Status:** $(sudo tailscale status 2>/dev/null | head -1 || echo "Not connected")
+- **Check Status:** sudo tailscale status
+- **Connect:** sudo tailscale up
+
+## 🔧 UCI Configuration (OpenWrt)
+
+### System Settings
+- **Hostname:** ${TARGET_HOSTNAME:-Not configured}
+- **Timezone:** $(uci get system.system.timezone 2>/dev/null || echo "Default")
+- **NTP Server:** $(uci get system.ntp.server 2>/dev/null || echo "Default")
+
+### Wireless Settings
+- **SSID:** ${TARGET_WIFI_SSID:-Not configured}
+- **Channel:** ${TARGET_WIFI_CHANNEL:-Not configured}
+- **Status:** $(uci get wireless.@wifi-iface[0].disabled 2>/dev/null || echo "Unknown")
+
+### User Accounts
+- **Admin Password:** Set to 1qaz2wsx
+- **Root Access:** Available
+
+## 📁 Backup Locations
+
+### UCI Backups
+- **Location:** /etc/uci-backup-* or /tmp/uci_backup_*
+- **Contents:** Complete UCI configuration backup
+
+### Node-RED Backups
+- **Location:** ~/.node-red/flows_*.json
+- **Standard Backup:** ~/.node-red/.flows.json.backup
+
+### Docker Backups
+- **Script:** /opt/portainer/backup-services.sh
+- **Usage:** sudo /opt/portainer/backup-services.sh
+
+## 🛠️ Management Commands
+
+### Service Management
+\`\`\`bash
+# Node-RED
+sudo systemctl status nodered
+sudo systemctl restart nodered
+sudo journalctl -u nodered -f
+
+# Docker
+docker ps
+docker logs [container_name]
+docker restart [container_name]
+
+# Tailscale
+sudo tailscale status
+sudo tailscale up
+sudo tailscale down
+\`\`\`
+
+### UCI Management
+\`\`\`bash
+# View configuration
+sudo uci show
+
+# Network
+sudo uci show network
+sudo /etc/init.d/network reload
+
+# Wireless
+sudo uci show wireless
+sudo wifi reload
+\`\`\`
+
+## 🔍 Troubleshooting
+
+### Check Service Status
+\`\`\`bash
+# All services
+sudo systemctl status nodered docker
+
+# Docker containers
+docker ps -a
+
+# Network connectivity
+ping -c 3 8.8.8.8
+\`\`\`
+
+### Log Locations
+- **Node-RED:** /var/log/syslog (journalctl -u nodered)
+- **Docker:** docker logs [container_name]
+- **System:** /var/log/syslog
+
+## 📞 Support Information
+
+- **Repository:** https://github.com/Loranet-Technologies/bivicom-radar
+- **Author:** Aqmar (Loranet Technologies)
+- **License:** MIT
+
+---
+*Generated on $timestamp by Loranet Infrastructure Setup Script v2.1*
+EOF
+
+    print_success "Installation status file created: $status_file"
+    
+    # Copy to local PC if we're running from a local directory
+    local script_dir=$(dirname "$(readlink -f "$0")" 2>/dev/null || dirname "$0")
+    if [ -w "$script_dir" ] && [ "$script_dir" != "/" ]; then
+        local local_copy="$script_dir/installation_status_$(date +%Y%m%d_%H%M%S).md"
+        cp "$status_file" "$local_copy" 2>/dev/null && {
+            print_success "Status file copied to local directory: $local_copy"
+        } || {
+            print_warning "Could not copy status file to local directory"
+        }
+    fi
+    
+    # Also create a symlink for easy access
+    ln -sf "$status_file" "/opt/installation_status_latest.md" 2>/dev/null || true
+    print_status "Latest status available at: /opt/installation_status_latest.md"
+}
+
 # Function to verify all installations
 verify_installation() {
     print_status "Verifying installation..."
@@ -1145,6 +1304,10 @@ EOFNEWGRP
     SERVER_IP=$(hostname -I | awk '{print $1}')
     
     print_success "Installation verification completed"
+    
+    # Create installation status file
+    create_installation_status_file
+    
     echo
     print_status "=== SERVICE ACCESS INFORMATION ==="
     echo -e "${GREEN}Node-RED:${NC} http://$SERVER_IP:1880"
