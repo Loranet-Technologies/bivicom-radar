@@ -296,9 +296,13 @@ restart_uci_services() {
     
     if [ "$network_reloaded" = true ]; then
         print_success "UCI services restart completed"
+        # Brief delay to allow network changes to take effect
+        sleep 2
     else
         print_warning "UCI services restart completed with warnings"
         print_status "Some network changes may require a reboot to take effect"
+        # Longer delay if network reload failed
+        sleep 5
     fi
 }
 
@@ -388,6 +392,9 @@ install_nvm() {
     
     # Download and install NVM
     curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/$NVM_VERSION/install.sh" | bash
+    
+    # Wait for NVM installation to complete
+    sleep 3
     
     # Source NVM for the current shell session
     export NVM_DIR="$HOME/.nvm"
@@ -546,18 +553,38 @@ copy_flows_to_script() {
     # Create nodered_flows directory in script location
     mkdir -p "$SCRIPT_DIR/nodered_flows"
     
-    # Copy flows from current server if they exist
-    if [ -f "/home/admin/.node-red/flows.json" ]; then
-        cp "/home/admin/.node-red/flows.json" "$SCRIPT_DIR/nodered_flows/flows.json"
-        print_success "Flows copied to script directory"
+    # Check if we're running from a local directory (has nodered_flows folder)
+    if [ -f "$SCRIPT_DIR/nodered_flows/flows.json" ]; then
+        print_status "Found local flows in script directory"
+        print_success "Using local flows from repository"
     else
-        print_warning "No existing flows found on this server"
-    fi
-    
-    # Copy package.json if it exists
-    if [ -f "/home/admin/.node-red/package.json" ]; then
-        cp "/home/admin/.node-red/package.json" "$SCRIPT_DIR/nodered_flows/package.json"
-        print_success "Package.json copied to script directory"
+    # Download flows from repository
+    print_status "Downloading flows from repository..."
+    sleep 2  # Brief delay before download
+    if curl -sSL "https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/nodered_flows/flows.json" -o "$SCRIPT_DIR/nodered_flows/flows.json" 2>/dev/null; then
+        print_success "Flows downloaded from repository"
+    else
+            print_warning "Failed to download flows from repository, trying local server flows..."
+            # Fallback: Copy flows from current server if they exist
+            if [ -f "/home/admin/.node-red/flows.json" ]; then
+                cp "/home/admin/.node-red/flows.json" "$SCRIPT_DIR/nodered_flows/flows.json"
+                print_success "Flows copied from local server"
+            else
+                print_warning "No existing flows found on this server"
+            fi
+        fi
+        
+        # Download package.json from repository
+        sleep 1  # Brief delay between downloads
+        if curl -sSL "https://raw.githubusercontent.com/Loranet-Technologies/bivicom-radar/main/nodered_flows/package.json" -o "$SCRIPT_DIR/nodered_flows/package.json" 2>/dev/null; then
+            print_success "Package.json downloaded from repository"
+        else
+            # Fallback: Copy package.json from current server if it exists
+            if [ -f "/home/admin/.node-red/package.json" ]; then
+                cp "/home/admin/.node-red/package.json" "$SCRIPT_DIR/nodered_flows/package.json"
+                print_success "Package.json copied from local server"
+            fi
+        fi
     fi
 }
 
@@ -651,18 +678,19 @@ restore_nodered_flows() {
     
     if [ "$restored" = true ]; then
         print_success "Flows restored from backup"
+        # Restart Node-RED
+        sudo systemctl start nodered
+        sleep 5
+        
+        if sudo systemctl is-active --quiet nodered; then
+            print_success "Node-RED restarted successfully"
+            return 0
+        else
+            print_error "Failed to restart Node-RED"
+            return 1
+        fi
     else
         print_warning "No valid backup found, will use default flows"
-    fi
-    
-    # Restart Node-RED
-    sudo systemctl start nodered
-    sleep 5
-    
-    if sudo systemctl is-active --quiet nodered; then
-        print_success "Node-RED restarted successfully"
-    else
-        print_error "Failed to restart Node-RED"
         return 1
     fi
 }
@@ -699,8 +727,11 @@ import_flows() {
     # If local flows failed or don't exist, try to restore from backup
     if [ "$flows_imported" = false ]; then
         print_warning "Local flows not available, checking for existing backups..."
-        restore_nodered_flows
-        flows_imported=true
+        if restore_nodered_flows; then
+            flows_imported=true
+        else
+            print_warning "No valid backup found, will create default flows"
+        fi
     fi
     
     # If still no flows, create default
@@ -726,8 +757,16 @@ EOF
     fi
     
     # Set proper ownership
-    sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
-    sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/package.json" 2>/dev/null || true
+    if [ -f "$NODERED_HOME/.node-red/flows.json" ]; then
+        sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/flows.json"
+    else
+        print_error "flows.json file not found after import process"
+        return 1
+    fi
+    
+    if [ -f "$NODERED_HOME/.node-red/package.json" ]; then
+        sudo chown $NODERED_USER:$NODERED_USER "$NODERED_HOME/.node-red/package.json"
+    fi
     
     # Final validation
     if validate_nodered_flows "$NODERED_HOME/.node-red/flows.json"; then
@@ -803,6 +842,8 @@ install_docker() {
     sudo systemctl enable docker
     sudo systemctl start docker
     
+    # Wait for Docker to fully start
+    sleep 5
     print_success "Docker installed successfully"
 }
 
@@ -897,9 +938,15 @@ start_docker_services() {
     cd $PORTAINER_DATA_DIR
     docker compose up -d
     
+    # Wait for Portainer to start
+    sleep 3
+    
     # Start Restreamer
     cd $RESTREAMER_CONFIG_DIR
     docker compose up -d
+    
+    # Wait for Restreamer to start
+    sleep 3
     
     print_success "Docker services started"
 EOFNEWGRP
