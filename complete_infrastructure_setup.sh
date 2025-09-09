@@ -4,10 +4,12 @@
 # Complete Infrastructure Setup Script with UCI Configuration
 # =============================================================================
 # This script combines Node-RED, Tailscale, Docker, Portainer, Restreamer,
-# and UCI configuration setup for OpenWrt systems
+# curl, and UCI configuration setup for OpenWrt systems
+# Includes LAN configuration fixes and improved error handling
 # 
 # Author: Aqmar
 # Date: $(date +%Y-%m-%d)
+# Version: 2.0
 # =============================================================================
 
 set -e  # Exit on any error
@@ -435,6 +437,10 @@ update_system() {
     echo "dnsmasq dnsmasq/confdir string /etc/dnsmasq.d" | sudo debconf-set-selections
     echo "dnsmasq dnsmasq/run_daemon boolean true" | sudo debconf-set-selections
     echo "dnsmasq dnsmasq/run_daemon seen true" | sudo debconf-set-selections
+    
+    # Install essential tools first (including curl)
+    print_status "Installing essential tools..."
+    sudo apt install -y curl wget gnupg lsb-release software-properties-common
     
     sudo apt update -y
     print_success "System packages updated"
@@ -1475,6 +1481,36 @@ configure_uci_network() {
     print_success "UCI network configuration completed (network settings removed)"
 }
 
+# Function to fix LAN configuration issues
+fix_lan_configuration() {
+    print_status "Checking and fixing LAN configuration..."
+    
+    # Check current LAN configuration
+    local lan_proto=$(uci -q get network.lan.proto 2>/dev/null || echo "unknown")
+    local lan_ifname=$(uci -q get network.lan.ifname 2>/dev/null || echo "unknown")
+    
+    print_status "Current LAN protocol: $lan_proto"
+    print_status "Current LAN interfaces: $lan_ifname"
+    
+    # Fix LAN protocol if it's set to DHCP (should be static)
+    if [ "$lan_proto" = "dhcp" ]; then
+        print_warning "LAN protocol is set to DHCP, fixing to static..."
+        sudo uci set network.lan.proto='static'
+        print_success "LAN protocol fixed to static"
+    fi
+    
+    # Fix LAN interfaces if wlan0 is missing
+    if [[ "$lan_ifname" != *"wlan0"* ]]; then
+        print_warning "LAN interface missing wlan0, adding it..."
+        sudo uci set network.lan.ifname='eth0 wlan0'
+        print_success "LAN interfaces updated to include wlan0"
+    fi
+    
+    # Commit changes
+    sudo uci commit network
+    print_success "LAN configuration fixes applied"
+}
+
 # Function to configure UCI wireless
 configure_uci_wireless() {
     print_status "Configuring UCI wireless settings..."
@@ -2103,15 +2139,16 @@ main() {
         configure_uci_system
         configure_uci_password
         configure_uci_network
+        fix_lan_configuration
         configure_uci_wireless
         restart_uci_services
     fi
     
     # Part 2: Node-RED and Tailscale Setup
     print_section "PART 2: NODE-RED AND TAILSCALE SETUP"
-    copy_flows_to_script
     update_system
     install_dependencies
+    copy_flows_to_script
     install_nvm
     install_nodejs
     install_nodered
