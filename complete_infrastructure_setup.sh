@@ -429,9 +429,20 @@ detect_architecture() {
 update_system() {
     print_status "Updating system packages..."
     
-    # Fix any broken packages first
+    # Set non-interactive mode to prevent debconf dialogs
+    export DEBIAN_FRONTEND=noninteractive
+    
+    # Fix any broken packages first - this is critical before installing anything
+    print_status "Fixing broken packages..."
     sudo dpkg --configure -a 2>/dev/null || true
-    sudo apt --fix-broken install -y 2>/dev/null || true
+    sudo apt-get -f install -y 2>/dev/null || true
+    
+    # Repair dnsmasq if stuck half-installed
+    print_status "Checking and repairing dnsmasq installation..."
+    if dpkg -l | grep -q "^iU.*dnsmasq"; then
+        print_warning "dnsmasq is in half-installed state, repairing..."
+        sudo apt-get --fix-broken install -y dnsmasq 2>/dev/null || true
+    fi
     
     # Configure dnsmasq non-interactively to prevent prompts
     echo "dnsmasq dnsmasq/confdir string /etc/dnsmasq.d" | sudo debconf-set-selections
@@ -440,9 +451,12 @@ update_system() {
     
     # Install essential tools first (including curl)
     print_status "Installing essential tools..."
-    sudo apt install -y curl wget gnupg lsb-release software-properties-common
+    DEBIAN_FRONTEND=noninteractive sudo apt install -y curl wget gnupg lsb-release software-properties-common
     
-    sudo apt update -y
+    # Update package lists
+    print_status "Updating package lists..."
+    DEBIAN_FRONTEND=noninteractive sudo apt update -y
+    
     print_success "System packages updated"
 }
 
@@ -466,6 +480,7 @@ install_dependencies() {
     fi
     
     # Prepare package lists
+    # Note: libsqlite3-dev and sqlite3 are required for Node-RED SQLite node compilation
     local basic_packages=(
         apt-transport-https
         ca-certificates
@@ -478,6 +493,8 @@ install_dependencies() {
         htop
         build-essential
         python3
+        libsqlite3-dev
+        sqlite3
     )
     
     local docker_packages=(
@@ -503,7 +520,7 @@ install_dependencies() {
         
         # Update package index after adding Docker repository
         print_status "Updating package index for Docker repository..."
-        sudo apt update
+        DEBIAN_FRONTEND=noninteractive sudo apt update
         
         # Combine all packages into single installation
         print_status "Installing all dependencies and Docker packages in one go..."
