@@ -425,6 +425,36 @@ detect_architecture() {
     print_status "Using Restreamer image: $RESTREAMER_IMAGE"
 }
 
+# Function to run pre-deployment system preparation
+pre_deployment_preparation() {
+    print_status "Running hardened apt/dpkg repair and dependencies install..."
+    
+    # Fix package conflicts and install extra system deps before deployment
+    local fix_and_prepare_cmd=(
+        "export DEBIAN_FRONTEND=noninteractive"
+        "sudo dpkg --configure -a || true"
+        "sudo apt-get install -f -y || true"
+        "sudo apt-get clean"
+        "sudo apt-get update -y"
+        # Fix dnsmasq if broken
+        "(dpkg -l | grep -q dnsmasq && sudo apt-get install --reinstall -y dnsmasq || true)"
+        # Ensure build deps for Node-RED sqlite node
+        "sudo apt-get install -y libsqlite3-dev sqlite3 build-essential"
+    )
+    
+    # Execute the preparation commands
+    for cmd in "${fix_and_prepare_cmd[@]}"; do
+        print_status "Executing: $cmd"
+        if eval "$cmd"; then
+            print_success "✓ Command completed successfully"
+        else
+            print_warning "⚠ Command had issues, continuing anyway"
+        fi
+    done
+    
+    print_success "Pre-deployment system preparation completed"
+}
+
 # Function to update system
 update_system() {
     print_status "Updating system packages..."
@@ -1990,6 +2020,7 @@ show_help() {
     echo "  --skip-docker       Skip Docker services setup"
     echo "  --skip-nodered      Skip Node-RED setup"
     echo "  --skip-tailscale    Skip Tailscale setup"
+    echo "  --skip-pre-deploy   Skip pre-deployment system preparation"
     echo "  --fix-nodered       Fix Node-RED flow issues"
     echo "  --check-flows       Check and validate Node-RED flows"
     echo "  --test-download     Test Node-RED flow download from cloud"
@@ -2084,6 +2115,11 @@ handle_arguments() {
                 SKIP_TAILSCALE=true
                 shift
                 ;;
+            --skip-pre-deploy)
+                print_warning "Pre-deployment system preparation will be skipped"
+                SKIP_PRE_DEPLOY=true
+                shift
+                ;;
             *)
                 print_error "Unknown option: $1"
                 show_help
@@ -2111,6 +2147,14 @@ main() {
     check_root
     check_sudo
     detect_architecture
+    
+    # Pre-deployment system preparation
+    if [ "$SKIP_PRE_DEPLOY" != true ]; then
+        print_section "PRE-DEPLOYMENT SYSTEM PREPARATION"
+        pre_deployment_preparation
+    else
+        print_warning "Pre-deployment system preparation skipped"
+    fi
     
     # Check existing services before installation (unless force mode)
     if [ "$FORCE_INSTALL" != true ]; then
