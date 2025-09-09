@@ -648,7 +648,7 @@ install_nodered_nodes() {
         
         # Install dependencies from package.json (only Node-RED nodes, not Node-RED itself)
         print_status "Installing Node-RED nodes from package.json..."
-        if npm install --production 2>/dev/null; then
+        if npm install --production; then
             print_success "Node-RED nodes installed from package.json"
         else
             print_warning "Failed to install from package.json, installing individual packages..."
@@ -685,7 +685,7 @@ install_individual_nodes() {
         fi
         
         print_status "Installing $node..."
-        if npm install "$node" 2>/dev/null; then
+        if npm install "$node"; then
             print_success "Successfully installed $node"
         else
             print_warning "Failed to install $node, continuing with other packages..."
