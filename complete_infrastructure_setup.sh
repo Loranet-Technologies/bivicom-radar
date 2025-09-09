@@ -125,7 +125,7 @@ check_existing_services() {
     local services_missing=()
     
     # Check Docker
-    if command -v docker >/dev/null 2>&1 && systemctl is-active --quiet docker; then
+    if command -v docker >/dev/null 2>&1 && sudo systemctl is-active --quiet docker; then
         services_installed+=("Docker")
         print_success "✓ Docker is already installed and running"
     else
@@ -155,9 +155,9 @@ check_existing_services() {
     local containers_running=0
     if command -v docker >/dev/null 2>&1; then
         # Check if user has Docker permissions by testing a simple command
-        if docker version >/dev/null 2>&1; then
+        if sudo docker version >/dev/null 2>&1; then
             # User has Docker permissions, check containers
-            if docker ps --format "{{.Names}}" 2>/dev/null | grep -q portainer; then
+            if sudo docker ps --format "{{.Names}}" 2>/dev/null | grep -q portainer; then
                 services_installed+=("Portainer")
                 print_success "✓ Portainer container is already running"
                 containers_running=$((containers_running + 1))
@@ -166,7 +166,7 @@ check_existing_services() {
                 print_warning "✗ Portainer container is not running"
             fi
             
-            if docker ps --format "{{.Names}}" 2>/dev/null | grep -q restreamer; then
+            if sudo docker ps --format "{{.Names}}" 2>/dev/null | grep -q restreamer; then
                 services_installed+=("Restreamer")
                 print_success "✓ Restreamer container is already running"
                 containers_running=$((containers_running + 1))
@@ -498,7 +498,7 @@ install_dependencies() {
     # dnsmasq configuration already set in update_system()
     
     # Check if Docker is already installed and running
-    if command -v docker >/dev/null 2>&1 && systemctl is-active --quiet docker; then
+    if command -v docker >/dev/null 2>&1 && sudo systemctl is-active --quiet docker; then
         print_success "Docker is already installed and running, skipping Docker installation"
         DOCKER_ALREADY_INSTALLED=true
     elif command -v docker >/dev/null 2>&1; then
@@ -571,7 +571,7 @@ install_dependencies() {
     sudo usermod -aG docker $USER
     
     # Enable and start Docker service (only if not already running)
-    if ! systemctl is-active --quiet docker; then
+    if ! sudo systemctl is-active --quiet docker; then
         print_status "Starting Docker service..."
         sudo systemctl enable docker
         sudo systemctl start docker
@@ -1206,8 +1206,8 @@ import_flows() {
     fi
     
     # Set proper permissions
-    chown -R "$USER:$USER" "$NODERED_HOME/.node-red"
-    chmod 644 "$NODERED_HOME/.node-red/flows.json"
+    sudo chown -R "$USER:$USER" "$NODERED_HOME/.node-red"
+    sudo chmod 644 "$NODERED_HOME/.node-red/flows.json"
     
     # Enable and start Node-RED
     print_status "Enabling and starting Node-RED service..."
@@ -1369,13 +1369,13 @@ start_docker_services() {
     local portainer_running=false
     local restreamer_running=false
     
-    if docker version >/dev/null 2>&1; then
-        if docker ps --format "{{.Names}}" 2>/dev/null | grep -q portainer; then
+    if sudo docker version >/dev/null 2>&1; then
+        if sudo docker ps --format "{{.Names}}" 2>/dev/null | grep -q portainer; then
             portainer_running=true
             print_success "Portainer container is already running"
         fi
         
-        if docker ps --format "{{.Names}}" 2>/dev/null | grep -q restreamer; then
+        if sudo docker ps --format "{{.Names}}" 2>/dev/null | grep -q restreamer; then
             restreamer_running=true
             print_success "Restreamer container is already running"
         fi
@@ -1386,39 +1386,40 @@ start_docker_services() {
     # Only start containers that are not already running
     if [ "$portainer_running" = false ] || [ "$restreamer_running" = false ]; then
         print_status "Starting Docker containers..."
-        newgrp docker << EOFNEWGRP
+        
         # Start Portainer (if not running)
-        if ! docker ps --format "{{.Names}}" | grep -q portainer; then
+        if ! sudo docker ps --format "{{.Names}}" | grep -q portainer; then
+            print_status "Starting Portainer container..."
             cd $PORTAINER_DATA_DIR
-            if docker compose up -d; then
-                echo "✓ Portainer started successfully"
+            if sudo docker compose up -d; then
+                print_success "✓ Portainer started successfully"
             else
-                echo "✗ Failed to start Portainer"
-                echo "Checking Portainer logs..."
-                docker logs portainer --tail 20 2>/dev/null || echo "No logs available"
+                print_error "✗ Failed to start Portainer"
+                print_status "Checking Portainer logs..."
+                sudo docker logs portainer --tail 20 2>/dev/null || echo "No logs available"
             fi
             sleep 3
         fi
         
         # Start Restreamer (if not running)
-        if ! docker ps --format "{{.Names}}" | grep -q restreamer; then
+        if ! sudo docker ps --format "{{.Names}}" | grep -q restreamer; then
+            print_status "Starting Restreamer container..."
             cd $RESTREAMER_CONFIG_DIR
-            if docker compose up -d; then
-                echo "✓ Restreamer started successfully"
+            if sudo docker compose up -d; then
+                print_success "✓ Restreamer started successfully"
             else
-                echo "✗ Failed to start Restreamer"
-                echo "Checking Restreamer logs..."
-                docker logs restreamer --tail 20 2>/dev/null || echo "No logs available"
+                print_error "✗ Failed to start Restreamer"
+                print_status "Checking Restreamer logs..."
+                sudo docker logs restreamer --tail 20 2>/dev/null || echo "No logs available"
             fi
             sleep 3
         fi
-EOFNEWGRP
     else
         print_success "All Docker containers are already running"
     fi
     
     # Check if services started successfully
-    if docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "(portainer|restreamer)" >/dev/null 2>&1; then
+    if sudo docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "(portainer|restreamer)" >/dev/null 2>&1; then
         print_success "Docker services started successfully"
     else
         print_warning "Docker services may not have started properly"
@@ -1442,37 +1443,37 @@ create_management_scripts() {
 case "$1" in
     start)
         echo "Starting all services..."
-        cd /data/portainer && docker compose up -d
-        cd /data/restreamer && docker compose up -d
+        cd /data/portainer && sudo docker compose up -d
+        cd /data/restreamer && sudo docker compose up -d
         echo "All services started"
         ;;
     stop)
         echo "Stopping all services..."
-        cd /data/portainer && docker compose down
-        cd /data/restreamer && docker compose down
+        cd /data/portainer && sudo docker compose down
+        cd /data/restreamer && sudo docker compose down
         echo "All services stopped"
         ;;
     restart)
         echo "Restarting all services..."
-        cd /data/portainer && docker compose restart
-        cd /data/restreamer && docker compose restart
+        cd /data/portainer && sudo docker compose restart
+        cd /data/restreamer && sudo docker compose restart
         echo "All services restarted"
         ;;
     status)
         echo "Service status:"
-        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+        sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
         ;;
     logs)
         echo "Portainer logs:"
-        docker logs portainer --tail 20
+        sudo docker logs portainer --tail 20
         echo
         echo "Restreamer logs:"
-        docker logs restreamer --tail 20
+        sudo docker logs restreamer --tail 20
         ;;
     update)
         echo "Updating all services..."
-        cd /data/portainer && docker compose pull && docker compose up -d
-        cd /data/restreamer && docker compose pull && docker compose up -d
+        cd /data/portainer && sudo docker compose pull && sudo docker compose up -d
+        cd /data/restreamer && sudo docker compose pull && sudo docker compose up -d
         echo "All services updated"
         ;;
     *)
@@ -1503,7 +1504,7 @@ echo "Creating backup directory..."
 mkdir -p $BACKUP_DIR
 
 echo "Backing up Portainer data..."
-docker run --rm -v portainer_portainer_data:/data -v $BACKUP_DIR:/backup alpine tar czf /backup/portainer-$DATE.tar.gz -C /data .
+sudo docker run --rm -v portainer_portainer_data:/data -v $BACKUP_DIR:/backup alpine tar czf /backup/portainer-$DATE.tar.gz -C /data .
 
 echo "Backing up Restreamer data..."
 tar czf $BACKUP_DIR/restreamer-$DATE.tar.gz /data/restreamer/db
@@ -1537,8 +1538,8 @@ fix_lan_configuration() {
     print_status "Checking and fixing LAN configuration..."
     
     # Check current LAN configuration
-    local lan_proto=$(uci -q get network.lan.proto 2>/dev/null || echo "unknown")
-    local lan_ifname=$(uci -q get network.lan.ifname 2>/dev/null || echo "unknown")
+    local lan_proto=$(sudo uci -q get network.lan.proto 2>/dev/null || echo "unknown")
+    local lan_ifname=$(sudo uci -q get network.lan.ifname 2>/dev/null || echo "unknown")
     
     print_status "Current LAN protocol: $lan_proto"
     print_status "Current LAN interfaces: $lan_ifname"
@@ -1750,23 +1751,23 @@ create_installation_status_file() {
 ## 🚀 Services Installed
 
 ### Node-RED
-- **Status:** $(systemctl is-active nodered 2>/dev/null || echo "Unknown")
+- **Status:** $(sudo systemctl is-active nodered 2>/dev/null || echo "Unknown")
 - **URL:** http://$server_ip:1880
 - **Service:** sudo systemctl status nodered
 - **Logs:** sudo journalctl -u nodered -f
 
 ### Docker Services
-- **Docker Status:** $(systemctl is-active docker 2>/dev/null || echo "Unknown")
-- **Containers:** $(docker ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null || echo "Docker not available")
+- **Docker Status:** $(sudo systemctl is-active docker 2>/dev/null || echo "Unknown")
+- **Containers:** $(sudo docker ps --format "table {{.Names}}\t{{.Status}}" 2>/dev/null || echo "Docker not available")
 
 #### Portainer
-- **Status:** $(docker ps --filter "name=portainer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
+- **Status:** $(sudo docker ps --filter "name=portainer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
 - **HTTP URL:** http://$server_ip:9000
 - **HTTPS URL:** https://$server_ip:9443
 - **Data Directory:** /data/portainer
 
 #### Restreamer
-- **Status:** $(docker ps --filter "name=restreamer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
+- **Status:** $(sudo docker ps --filter "name=restreamer" --format "{{.Status}}" 2>/dev/null || echo "Not running")
 - **URL:** http://$server_ip:8080
 - **Username:** $RESTREAMER_USERNAME
 - **Password:** $RESTREAMER_PASSWORD
@@ -1781,13 +1782,13 @@ create_installation_status_file() {
 
 ### System Settings
 - **Hostname:** ${TARGET_HOSTNAME:-Not configured}
-- **Timezone:** $(uci get system.system.timezone 2>/dev/null || echo "Default")
-- **NTP Server:** $(uci get system.ntp.server 2>/dev/null || echo "Default")
+- **Timezone:** $(sudo uci get system.system.timezone 2>/dev/null || echo "Default")
+- **NTP Server:** $(sudo uci get system.ntp.server 2>/dev/null || echo "Default")
 
 ### Wireless Settings
 - **SSID:** ${TARGET_WIFI_SSID:-Not configured}
 - **Channel:** ${TARGET_WIFI_CHANNEL:-Not configured}
-- **Status:** $(uci get wireless.@wifi-iface[0].disabled 2>/dev/null || echo "Unknown")
+- **Status:** $(sudo uci get wireless.@wifi-iface[0].disabled 2>/dev/null || echo "Unknown")
 
 ### User Accounts
 - **Admin Password:** Set to 1qaz2wsx
@@ -1817,9 +1818,9 @@ sudo systemctl restart nodered
 sudo journalctl -u nodered -f
 
 # Docker
-docker ps
-docker logs [container_name]
-docker restart [container_name]
+sudo docker ps
+sudo docker logs [container_name]
+sudo docker restart [container_name]
 
 # Tailscale
 sudo tailscale status
@@ -1849,14 +1850,14 @@ sudo wifi reload
 sudo systemctl status nodered docker
 
 # Docker containers
-docker ps -a
+sudo docker ps -a
 
 # Network connectivity
 ping -c 3 8.8.8.8
 \`\`\`
 
 ### Log Locations
-- **Node-RED:** /var/log/syslog (journalctl -u nodered)
+- **Node-RED:** /var/log/syslog (sudo journalctl -u nodered)
 - **Docker:** docker logs [container_name]
 - **System:** /var/log/syslog
 
@@ -1896,7 +1897,7 @@ verify_installation() {
     sleep 10
     
     # Check Docker service
-    if systemctl is-active --quiet docker; then
+    if sudo systemctl is-active --quiet docker; then
         print_success "Docker service is running"
     else
         print_error "Docker service is not running"
@@ -1928,15 +1929,15 @@ verify_installation() {
     
     # Check Docker containers (with permission handling)
     print_status "Checking Docker containers..."
-    if docker version >/dev/null 2>&1; then
-        if docker ps 2>/dev/null | grep -q portainer; then
+    if sudo docker version >/dev/null 2>&1; then
+        if sudo docker ps 2>/dev/null | grep -q portainer; then
             print_success "Portainer container is running"
         else
             print_error "Portainer container is not running"
             return 1
         fi
         
-        if docker ps 2>/dev/null | grep -q restreamer; then
+        if sudo docker ps 2>/dev/null | grep -q restreamer; then
             print_success "Restreamer container is running"
         else
             print_error "Restreamer container is not running"
@@ -1970,8 +1971,8 @@ verify_installation() {
     print_status "=== MANAGEMENT COMMANDS ==="
     echo -e "${BLUE}Node-RED status:${NC} sudo systemctl status nodered"
     echo -e "${BLUE}Node-RED logs:${NC} sudo journalctl -u nodered -f"
-    echo -e "${BLUE}Docker containers:${NC} docker ps"
-    echo -e "${BLUE}Docker logs:${NC} docker logs [container_name]"
+    echo -e "${BLUE}Docker containers:${NC} sudo docker ps"
+    echo -e "${BLUE}Docker logs:${NC} sudo docker logs [container_name]"
     echo -e "${BLUE}Tailscale status:${NC} sudo tailscale status"
     echo -e "${BLUE}Management script:${NC} /home/$USER/management-scripts/manage-services.sh"
 }
@@ -2240,8 +2241,8 @@ main() {
     print_success "Complete Infrastructure Setup Completed!"
     echo "=========================================="
     echo
-    print_warning "IMPORTANT: Docker group membership has been applied automatically during setup."
-    print_warning "If you encounter permission issues in future sessions, run: newgrp docker"
+    print_warning "IMPORTANT: All Docker commands use sudo for proper permissions."
+    print_warning "Docker group membership has been applied for future non-sudo access if needed."
     echo
     print_status "Management scripts created:"
     echo "  - /home/$USER/management-scripts/manage-services.sh"
