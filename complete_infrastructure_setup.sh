@@ -429,6 +429,9 @@ detect_architecture() {
 pre_deployment_preparation() {
     print_status "Running hardened apt/dpkg repair and dependencies install..."
     
+    # Fix DNS resolution early to prevent issues during package installation
+    fix_dns_resolution
+    
     # Fix package conflicts and install extra system deps before deployment
     local fix_and_prepare_cmd=(
         "export DEBIAN_FRONTEND=noninteractive"
@@ -1289,6 +1292,34 @@ install_tailscale() {
 # =============================================================================
 
 
+# Function to fix DNS resolution issues
+fix_dns_resolution() {
+    print_status "Checking and fixing DNS resolution..."
+    
+    # Test if we can resolve registry-1.docker.io
+    if ! timeout 10 bash -c "</dev/tcp/registry-1.docker.io/443" 2>/dev/null; then
+        print_warning "DNS resolution issue detected - fixing..."
+        
+        # Stop systemd-resolved to prevent conflicts
+        sudo systemctl stop systemd-resolved 2>/dev/null || true
+        
+        # Configure static DNS servers
+        print_status "Configuring static DNS servers..."
+        echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf >/dev/null
+        echo 'nameserver 1.1.1.1' | sudo tee -a /etc/resolv.conf >/dev/null
+        echo 'nameserver 8.8.4.4' | sudo tee -a /etc/resolv.conf >/dev/null
+        
+        # Test connectivity
+        if ping -c 1 -W 5 8.8.8.8 >/dev/null 2>&1; then
+            print_success "DNS resolution fixed - external connectivity confirmed"
+        else
+            print_warning "DNS fix applied but external connectivity still limited"
+        fi
+    else
+        print_success "DNS resolution working correctly"
+    fi
+}
+
 # Function to create directories
 create_docker_directories() {
     print_status "Creating required directories..."
@@ -1365,6 +1396,9 @@ EOF
 start_docker_services() {
     print_status "Starting Docker services..."
     
+    # Fix DNS resolution issues before starting containers
+    fix_dns_resolution
+    
     # Check if containers are already running (with permission handling)
     local portainer_running=false
     local restreamer_running=false
@@ -1405,12 +1439,28 @@ start_docker_services() {
         if ! sudo docker ps --format "{{.Names}}" | grep -q restreamer; then
             print_status "Starting Restreamer container..."
             cd $RESTREAMER_CONFIG_DIR
+            
+            # Try to start Restreamer
             if sudo docker compose up -d; then
                 print_success "✓ Restreamer started successfully"
             else
                 print_error "✗ Failed to start Restreamer"
                 print_status "Checking Restreamer logs..."
                 sudo docker logs restreamer --tail 20 2>/dev/null || echo "No logs available"
+                
+                # Check if it's a DNS/registry issue and try to pull image manually
+                print_status "Attempting to pull Restreamer image manually..."
+                if sudo docker pull $RESTREAMER_IMAGE; then
+                    print_success "✓ Restreamer image pulled successfully"
+                    print_status "Retrying Restreamer startup..."
+                    if sudo docker compose up -d; then
+                        print_success "✓ Restreamer started successfully after manual image pull"
+                    else
+                        print_error "✗ Restreamer still failed to start after image pull"
+                    fi
+                else
+                    print_error "✗ Failed to pull Restreamer image - check network connectivity"
+                fi
             fi
             sleep 3
         fi
