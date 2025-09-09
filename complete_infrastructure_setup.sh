@@ -407,22 +407,46 @@ restart_uci_services() {
 detect_architecture() {
     ARCH=$(uname -m)
     case $ARCH in
-        x86_64)
+        x86_64|amd64)
             RESTREAMER_IMAGE="datarhei/restreamer:latest"
+            print_status "Detected x86_64 architecture"
             ;;
         aarch64|arm64)
-            RESTREAMER_IMAGE="datarhei/restreamer-aarch64:latest"
+            # Check if multi-arch image is available, fallback to specific ARM image
+            if docker manifest inspect datarhei/restreamer:latest >/dev/null 2>&1; then
+                RESTREAMER_IMAGE="datarhei/restreamer:latest"
+                print_status "Using multi-arch image for ARM64"
+            else
+                RESTREAMER_IMAGE="datarhei/restreamer:arm64"
+                print_status "Using ARM64-specific image"
+            fi
             ;;
-        armv7l)
-            RESTREAMER_IMAGE="datarhei/restreamer-aarch64:latest"
+        armv7l|armhf)
+            # ARMv7 typically needs 32-bit ARM image
+            RESTREAMER_IMAGE="datarhei/restreamer:armhf"
+            print_status "Detected ARMv7 architecture - using ARMhf image"
+            ;;
+        armv6l)
+            # Raspberry Pi Zero and similar
+            RESTREAMER_IMAGE="datarhei/restreamer:armhf"
+            print_warning "ARMv6 detected - using ARMhf image (may have performance limitations)"
             ;;
         *)
-            print_warning "Unknown architecture: $ARCH. Using default restreamer image."
+            print_warning "Unknown architecture: $ARCH. Attempting to use multi-arch image."
             RESTREAMER_IMAGE="datarhei/restreamer:latest"
             ;;
     esac
+    
     print_status "Detected architecture: $ARCH"
-    print_status "Using Restreamer image: $RESTREAMER_IMAGE"
+    print_status "Selected Restreamer image: $RESTREAMER_IMAGE"
+    
+    # Validate image availability
+    print_status "Validating Restreamer image availability..."
+    if ! docker manifest inspect "$RESTREAMER_IMAGE" >/dev/null 2>&1; then
+        print_warning "Selected image may not be available. Will attempt to pull during installation."
+    else
+        print_success "Restreamer image is available in registry"
+    fi
 }
 
 # Function to run pre-deployment system preparation
@@ -1324,19 +1348,38 @@ fix_dns_resolution() {
 create_docker_directories() {
     print_status "Creating required directories..."
     
-    # Create portainer directory
+    # Create portainer directory with proper permissions
+    print_status "Creating Portainer directory: $PORTAINER_DATA_DIR"
     sudo mkdir -p $PORTAINER_DATA_DIR
     sudo chown $USER:$USER $PORTAINER_DATA_DIR
+    sudo chmod 755 $PORTAINER_DATA_DIR
     
-    # Create restreamer directory
+    # Create restreamer config directory
+    print_status "Creating Restreamer config directory: $RESTREAMER_CONFIG_DIR"
     sudo mkdir -p $RESTREAMER_CONFIG_DIR
     sudo chown $USER:$USER $RESTREAMER_CONFIG_DIR
+    sudo chmod 755 $RESTREAMER_CONFIG_DIR
     
-    # Create restreamer data directory
+    # Create restreamer data directory (legacy support)
+    print_status "Creating Restreamer data directory: $RESTREAMER_DATA_DIR"
     sudo mkdir -p $RESTREAMER_DATA_DIR
     sudo chown $USER:$USER $RESTREAMER_DATA_DIR
+    sudo chmod 755 $RESTREAMER_DATA_DIR
     
-    print_success "Directories created"
+    # Verify directory creation
+    for dir in "$PORTAINER_DATA_DIR" "$RESTREAMER_CONFIG_DIR" "$RESTREAMER_DATA_DIR"; do
+        if [ ! -d "$dir" ]; then
+            print_error "Failed to create directory: $dir"
+            return 1
+        fi
+        if [ ! -w "$dir" ]; then
+            print_error "Directory not writable: $dir"
+            return 1
+        fi
+        print_success "✓ Directory ready: $dir"
+    done
+    
+    print_success "All Docker directories created and configured"
 }
 
 # Function to create Portainer Docker Compose file
@@ -1372,24 +1415,63 @@ create_restreamer_compose() {
     print_status "Creating Restreamer Docker Compose configuration..."
     
     cat > $RESTREAMER_CONFIG_DIR/docker-compose.yml << EOF
+version: '3.8'
+
 services:
   restreamer:
     image: $RESTREAMER_IMAGE
     container_name: restreamer
-    restart: always
+    restart: unless-stopped
     environment:
       - RS_USERNAME=$RESTREAMER_USERNAME
       - RS_PASSWORD=$RESTREAMER_PASSWORD
       - TZ=$TIMEZONE
+      - RS_LOG_LEVEL=info
+      - RS_LOG_TOPICS=
     ports:
-      - "8080:8080"
+      - "8080:8080"   # HTTP API/UI
+      - "8181:8181"   # HTTPS API/UI
+      - "1935:1935"   # RTMP
+      - "1936:1936"   # RTMPS
+      - "6000:6000/udp"   # SRT
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - $RESTREAMER_DATA_DIR:/restreamer/db
+      - restreamer_data:/core/data
+      - restreamer_config:/core/config
+      - restreamer_cache:/tmp/hls
+    networks:
+      - restreamer_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/v3/skills", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+volumes:
+  restreamer_data:
+    driver: local
+  restreamer_config:
+    driver: local
+  restreamer_cache:
+    driver: local
+
+networks:
+  restreamer_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 EOF
     
-    print_success "Restreamer Docker Compose file created"
+    print_success "Restreamer Docker Compose file created with enhanced configuration"
 }
 
 # Function to start Docker services
@@ -1425,55 +1507,254 @@ start_docker_services() {
         if ! sudo docker ps --format "{{.Names}}" | grep -q portainer; then
             print_status "Starting Portainer container..."
             cd $PORTAINER_DATA_DIR
+            
+            # Clean up any existing failed container
+            sudo docker rm -f portainer 2>/dev/null || true
+            
             if sudo docker compose up -d; then
                 print_success "✓ Portainer started successfully"
+                
+                # Wait for Portainer to be fully ready
+                print_status "Waiting for Portainer to be fully ready..."
+                local portainer_ready=false
+                local wait_attempts=0
+                local max_wait_attempts=24  # 2 minutes total
+                
+                while [ $wait_attempts -lt $max_wait_attempts ] && [ "$portainer_ready" = false ]; do
+                    # Check if container is running and healthy
+                    if sudo docker ps --format "{{.Names}}" | grep -q portainer; then
+                        # Check if Portainer API is responding
+                        if curl -f -s http://localhost:9000/api/status >/dev/null 2>&1; then
+                            print_success "✓ Portainer is fully ready and API is responding"
+                            portainer_ready=true
+                        else
+                            # Check container health if available
+                            container_status=$(sudo docker inspect --format='{{.State.Status}}' portainer 2>/dev/null || echo "unknown")
+                            if [ "$container_status" = "running" ]; then
+                                # Just check if ports are accessible
+                                if netstat -tuln 2>/dev/null | grep -q ':9000 ' || ss -tuln 2>/dev/null | grep -q ':9000 '; then
+                                    print_success "✓ Portainer is ready (port 9000 accessible)"
+                                    portainer_ready=true
+                                fi
+                            fi
+                        fi
+                    fi
+                    
+                    if [ "$portainer_ready" = false ]; then
+                        sleep 5
+                        wait_attempts=$((wait_attempts + 1))
+                        if [ $((wait_attempts % 6)) -eq 0 ]; then  # Every 30 seconds
+                            print_status "Still waiting for Portainer to be ready... ($((wait_attempts * 5))s elapsed)"
+                        fi
+                    fi
+                done
+                
+                if [ "$portainer_ready" = false ]; then
+                    print_warning "Portainer may not be fully ready yet, but proceeding with installation"
+                    print_status "You can check Portainer status with: sudo docker logs portainer"
+                fi
+                
+                # Additional delay to ensure Portainer is stable before starting next service
+                print_status "Ensuring Portainer is stable before proceeding..."
+                sleep 10
+                
             else
                 print_error "✗ Failed to start Portainer"
                 print_status "Checking Portainer logs..."
                 sudo docker logs portainer --tail 20 2>/dev/null || echo "No logs available"
+                print_status "Checking Docker Compose logs..."
+                sudo docker compose logs --tail 10 2>/dev/null || echo "No compose logs available"
+                
+                # Don't proceed with Restreamer if Portainer failed
+                print_error "Portainer startup failed. Skipping Restreamer to avoid conflicts."
+                return 1
             fi
-            sleep 3
+        else
+            print_status "Portainer is already running - ensuring it's ready..."
+            sleep 5  # Brief delay even if already running
         fi
         
-        # Start Restreamer (if not running)
+        # Start Restreamer (if not running) - Only after Portainer is ready
+        print_section "STARTING RESTREAMER SERVICE"
+        print_status "Portainer startup completed. Now starting Restreamer..."
+        
         if ! sudo docker ps --format "{{.Names}}" | grep -q restreamer; then
             print_status "Starting Restreamer container..."
             cd $RESTREAMER_CONFIG_DIR
             
-            # Try to start Restreamer
-            if sudo docker compose up -d; then
-                print_success "✓ Restreamer started successfully"
-            else
-                print_error "✗ Failed to start Restreamer"
-                print_status "Checking Restreamer logs..."
-                sudo docker logs restreamer --tail 20 2>/dev/null || echo "No logs available"
-                
-                # Check if it's a DNS/registry issue and try to pull image manually
-                print_status "Attempting to pull Restreamer image manually..."
-                if sudo docker pull $RESTREAMER_IMAGE; then
-                    print_success "✓ Restreamer image pulled successfully"
-                    print_status "Retrying Restreamer startup..."
-                    if sudo docker compose up -d; then
-                        print_success "✓ Restreamer started successfully after manual image pull"
-                    else
-                        print_error "✗ Restreamer still failed to start after image pull"
-                    fi
-                else
-                    print_error "✗ Failed to pull Restreamer image - check network connectivity"
-                fi
+            # Pre-flight checks for Restreamer
+            print_status "Running pre-flight checks for Restreamer..."
+            
+            # Check if compose file exists
+            if [ ! -f "docker-compose.yml" ]; then
+                print_error "docker-compose.yml not found in $RESTREAMER_CONFIG_DIR"
+                return 1
             fi
-            sleep 3
+            
+            # Validate compose file
+            if ! sudo docker compose config >/dev/null 2>&1; then
+                print_error "Invalid docker-compose.yml configuration"
+                sudo docker compose config
+                return 1
+            fi
+            print_success "✓ Docker Compose configuration is valid"
+            
+            # Check and create volumes if needed
+            print_status "Ensuring Docker volumes exist..."
+            for volume in restreamer_data restreamer_config restreamer_cache; do
+                if ! sudo docker volume ls | grep -q "$volume"; then
+                    print_status "Creating volume: $volume"
+                    sudo docker volume create "$volume" || print_warning "Failed to create volume $volume"
+                fi
+            done
+            
+            # Check if network exists
+            if ! sudo docker network ls | grep -q restreamer_network; then
+                print_status "Creating restreamer network..."
+                sudo docker network create restreamer_network --driver bridge --subnet 172.20.0.0/16 2>/dev/null || true
+            fi
+            
+            # Try to pull image first
+            print_status "Pulling Restreamer image: $RESTREAMER_IMAGE"
+            if sudo docker pull $RESTREAMER_IMAGE; then
+                print_success "✓ Restreamer image pulled successfully"
+            else
+                print_warning "Failed to pull image, will attempt to start anyway"
+            fi
+            
+            # Clean up any existing failed containers
+            sudo docker rm -f restreamer 2>/dev/null || true
+            
+            # Attempt to start Restreamer with retry logic
+            local max_attempts=3
+            local attempt=1
+            local started=false
+            
+            while [ $attempt -le $max_attempts ] && [ "$started" = false ]; do
+                print_status "Attempt $attempt/$max_attempts: Starting Restreamer container..."
+                
+                # Start with detailed output on final attempt
+                if [ $attempt -eq $max_attempts ]; then
+                    sudo docker compose up -d --verbose
+                else
+                    sudo docker compose up -d 2>/dev/null
+                fi
+                
+                # Wait for container to initialize
+                sleep 5
+                
+                # Check if container started successfully
+                if sudo docker ps --format "{{.Names}}" | grep -q restreamer; then
+                    print_success "✓ Restreamer started successfully on attempt $attempt"
+                    started=true
+                    
+                    # Wait for health check
+                    print_status "Waiting for Restreamer health check..."
+                    local health_attempts=0
+                    while [ $health_attempts -lt 12 ]; do
+                        health_status=$(sudo docker inspect --format='{{.State.Health.Status}}' restreamer 2>/dev/null || echo "no-healthcheck")
+                        if [ "$health_status" = "healthy" ]; then
+                            print_success "✓ Restreamer is healthy and ready"
+                            break
+                        elif [ "$health_status" = "unhealthy" ]; then
+                            print_warning "Restreamer health check failed"
+                            break
+                        else
+                            sleep 5
+                            health_attempts=$((health_attempts + 1))
+                        fi
+                    done
+                else
+                    print_error "✗ Failed to start Restreamer on attempt $attempt"
+                    
+                    # Show logs for debugging
+                    print_status "Restreamer container logs (last 10 lines):"
+                    sudo docker logs restreamer --tail 10 2>/dev/null || echo "No logs available"
+                    
+                    # Show compose logs
+                    print_status "Docker Compose logs:"
+                    sudo docker compose logs --tail 10 2>/dev/null || echo "No compose logs available"
+                    
+                    if [ $attempt -lt $max_attempts ]; then
+                        print_status "Cleaning up and retrying in 10 seconds..."
+                        sudo docker compose down 2>/dev/null || true
+                        sudo docker system prune -f >/dev/null 2>&1 || true
+                        sleep 10
+                    fi
+                fi
+                
+                attempt=$((attempt + 1))
+            done
+            
+            if [ "$started" = false ]; then
+                print_error "✗ Failed to start Restreamer after $max_attempts attempts"
+                print_status "Troubleshooting information:"
+                print_status "- Image: $RESTREAMER_IMAGE"
+                print_status "- Config dir: $RESTREAMER_CONFIG_DIR"
+                print_status "- Architecture: $ARCH"
+                print_status "Check docker compose logs with: cd $RESTREAMER_CONFIG_DIR && sudo docker compose logs"
+                return 1
+            fi
         fi
     else
         print_success "All Docker containers are already running"
     fi
     
-    # Check if services started successfully
-    if sudo docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "(portainer|restreamer)" >/dev/null 2>&1; then
-        print_success "Docker services started successfully"
-    else
-        print_warning "Docker services may not have started properly"
+    # Comprehensive final check to ensure both services are ready
+    print_status "Performing final readiness check for all Docker services..."
+    
+    local services_ready=true
+    local final_check_attempts=0
+    local max_final_attempts=12  # 1 minute total
+    
+    while [ $final_check_attempts -lt $max_final_attempts ]; do
+        local portainer_ok=false
+        local restreamer_ok=false
+        
+        # Check Portainer
+        if sudo docker ps --format "{{.Names}}" | grep -q portainer; then
+            if curl -f -s http://localhost:9000/api/status >/dev/null 2>&1 || netstat -tuln 2>/dev/null | grep -q ':9000 '; then
+                portainer_ok=true
+            fi
+        fi
+        
+        # Check Restreamer  
+        if sudo docker ps --format "{{.Names}}" | grep -q restreamer; then
+            health_status=$(sudo docker inspect --format='{{.State.Health.Status}}' restreamer 2>/dev/null || echo "no-healthcheck")
+            if [ "$health_status" = "healthy" ]; then
+                restreamer_ok=true
+            elif curl -s http://localhost:8080 >/dev/null 2>&1; then
+                restreamer_ok=true
+            fi
+        fi
+        
+        if [ "$portainer_ok" = true ] && [ "$restreamer_ok" = true ]; then
+            print_success "✓ All Docker services are running and ready"
+            break
+        else
+            if [ "$portainer_ok" = false ]; then
+                print_status "Waiting for Portainer to be ready..."
+            fi
+            if [ "$restreamer_ok" = false ]; then
+                print_status "Waiting for Restreamer to be ready..."
+            fi
+            sleep 5
+            final_check_attempts=$((final_check_attempts + 1))
+        fi
+    done
+    
+    # Final validation
+    if [ $final_check_attempts -eq $max_final_attempts ]; then
+        print_error "Docker services did not become ready within the timeout period"
+        print_status "Current container status:"
+        sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "Cannot retrieve container status"
+        services_ready=false
+        return 1
     fi
+    
+    # Show final status
+    print_status "Final Docker services status:"
+    sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(portainer|restreamer|NAMES)" 2>/dev/null || echo "Cannot retrieve container details"
 }
 
 # Function to create management scripts
@@ -1977,25 +2258,113 @@ verify_installation() {
         return 1
     fi
     
-    # Check Docker containers (with permission handling)
-    print_status "Checking Docker containers..."
+    # Check Docker containers with comprehensive readiness validation
+    print_status "Verifying Docker containers are running and ready..."
     if sudo docker version >/dev/null 2>&1; then
+        
+        # Check Portainer with readiness validation
+        print_status "Validating Portainer container..."
         if sudo docker ps 2>/dev/null | grep -q portainer; then
-            print_success "Portainer container is running"
+            # Check if Portainer is actually ready
+            local portainer_ready=false
+            local check_attempts=0
+            while [ $check_attempts -lt 12 ] && [ "$portainer_ready" = false ]; do
+                if curl -f -s http://localhost:9000/api/status >/dev/null 2>&1; then
+                    print_success "✓ Portainer container is running and API is ready"
+                    portainer_ready=true
+                elif netstat -tuln 2>/dev/null | grep -q ':9000 ' || ss -tuln 2>/dev/null | grep -q ':9000 '; then
+                    print_success "✓ Portainer container is running and port is accessible"
+                    portainer_ready=true
+                else
+                    sleep 5
+                    check_attempts=$((check_attempts + 1))
+                fi
+            done
+            
+            if [ "$portainer_ready" = false ]; then
+                print_error "Portainer container is running but not ready/accessible"
+                return 1
+            fi
         else
             print_error "Portainer container is not running"
             return 1
         fi
         
+        # Check Restreamer with comprehensive validation
+        print_status "Validating Restreamer container..."
         if sudo docker ps 2>/dev/null | grep -q restreamer; then
-            print_success "Restreamer container is running"
+            # Check Restreamer health and readiness
+            local restreamer_ready=false
+            local check_attempts=0
+            local max_check_attempts=24  # 2 minutes total
+            
+            print_status "Waiting for Restreamer to be fully ready..."
+            while [ $check_attempts -lt $max_check_attempts ] && [ "$restreamer_ready" = false ]; do
+                # Check container health status
+                health_status=$(sudo docker inspect --format='{{.State.Health.Status}}' restreamer 2>/dev/null || echo "no-healthcheck")
+                container_status=$(sudo docker inspect --format='{{.State.Status}}' restreamer 2>/dev/null || echo "unknown")
+                
+                if [ "$health_status" = "healthy" ]; then
+                    print_success "✓ Restreamer container is running and healthy"
+                    restreamer_ready=true
+                elif [ "$container_status" = "running" ]; then
+                    # If no health check, try to verify port accessibility and API
+                    if netstat -tuln 2>/dev/null | grep -q ':8080 ' || ss -tuln 2>/dev/null | grep -q ':8080 '; then
+                        # Try to connect to Restreamer API
+                        if curl -f -s http://localhost:8080/api/v3/skills >/dev/null 2>&1; then
+                            print_success "✓ Restreamer container is running and API is ready"
+                            restreamer_ready=true
+                        elif curl -s http://localhost:8080 >/dev/null 2>&1; then
+                            print_success "✓ Restreamer container is running and web interface is accessible"
+                            restreamer_ready=true
+                        else
+                            # Port is open but API not ready yet
+                            sleep 5
+                            check_attempts=$((check_attempts + 1))
+                            if [ $((check_attempts % 6)) -eq 0 ]; then  # Every 30 seconds
+                                print_status "Still waiting for Restreamer API to be ready... ($((check_attempts * 5))s elapsed)"
+                            fi
+                        fi
+                    else
+                        # Port not ready yet
+                        sleep 5
+                        check_attempts=$((check_attempts + 1))
+                    fi
+                elif [ "$health_status" = "unhealthy" ]; then
+                    print_error "Restreamer container is unhealthy"
+                    print_status "Checking Restreamer logs for issues:"
+                    sudo docker logs restreamer --tail 15
+                    return 1
+                else
+                    # Container not running or other issues
+                    sleep 5
+                    check_attempts=$((check_attempts + 1))
+                fi
+            done
+            
+            if [ "$restreamer_ready" = false ]; then
+                print_error "Restreamer container is running but not ready after 2 minutes"
+                print_status "Container status: $container_status"
+                print_status "Health status: $health_status"
+                print_status "Restreamer logs (last 10 lines):"
+                sudo docker logs restreamer --tail 10
+                print_error "Installation cannot complete until Restreamer is ready"
+                return 1
+            fi
         else
             print_error "Restreamer container is not running"
+            print_status "This is a critical error - installation cannot complete"
             return 1
         fi
+        
+        # Final containers status summary
+        print_status "Final container status check:"
+        sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(portainer|restreamer|NAMES)"
+        
     else
-        print_warning "Cannot check Docker containers due to permission issues"
+        print_error "Cannot check Docker containers due to permission issues"
         print_status "Please ensure Docker is running and user has proper permissions"
+        return 1
     fi
     
     # Get server IP
