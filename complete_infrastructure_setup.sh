@@ -414,7 +414,7 @@ detect_architecture() {
             RESTREAMER_IMAGE="datarhei/restreamer-aarch64:latest"
             ;;
         armv7l)
-            RESTREAMER_IMAGE="datarhei/restreamer:latest"
+            RESTREAMER_IMAGE="datarhei/restreamer-aarch64:latest"
             ;;
         *)
             print_warning "Unknown architecture: $ARCH. Using default restreamer image."
@@ -1309,14 +1309,6 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       - $RESTREAMER_DATA_DIR:/restreamer/db
-    tmpfs:
-      - /tmp/hls
-    networks:
-      - restreamer-network
-
-networks:
-  restreamer-network:
-    driver: bridge
 EOF
     
     print_success "Restreamer Docker Compose file created"
@@ -1351,14 +1343,26 @@ start_docker_services() {
         # Start Portainer (if not running)
         if ! docker ps --format "{{.Names}}" | grep -q portainer; then
             cd $PORTAINER_DATA_DIR
-            docker compose up -d
+            if docker compose up -d; then
+                echo "✓ Portainer started successfully"
+            else
+                echo "✗ Failed to start Portainer"
+                echo "Checking Portainer logs..."
+                docker logs portainer --tail 20 2>/dev/null || echo "No logs available"
+            fi
             sleep 3
         fi
         
         # Start Restreamer (if not running)
         if ! docker ps --format "{{.Names}}" | grep -q restreamer; then
             cd $RESTREAMER_CONFIG_DIR
-            docker compose up -d
+            if docker compose up -d; then
+                echo "✓ Restreamer started successfully"
+            else
+                echo "✗ Failed to start Restreamer"
+                echo "Checking Restreamer logs..."
+                docker logs restreamer --tail 20 2>/dev/null || echo "No logs available"
+            fi
             sleep 3
         fi
 EOFNEWGRP
